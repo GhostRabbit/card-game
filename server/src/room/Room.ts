@@ -20,9 +20,15 @@ import {
   resolveNextEffect,
   continueAfterEffects,
   resolveControlReorder,
+  endTurn,
+  finishTurn,
+  drawCards,
+  discardFromHand,
   ServerGameState,
 } from "../game/GameEngine";
 import { buildPlayerView } from "../game/StateView";
+import { enqueueEffectsFromCard } from "../game/CardEffects";
+import { CARD_MAP } from "../data/cards";
 import { CardInstance, CardFace, TurnPhase } from "@compile/shared";
 import { GameLogger } from "../Logger";
 
@@ -294,17 +300,108 @@ export class Room {
     }
 
     // Queue drained — resume the turn flow
-    continueAfterEffects(state);
-    this.flushEffectLogs();
+    const ctx = state.effectQueueContext;
+    state.effectQueueContext = null;
+    
+    if (ctx === "immediate") {
+      if (state.pendingBonusPlay) {
+        state.turnPhase = TurnPhase.Action;
+        this.broadcastState();
+        return;
+      }
+      // Schedule phase-by-phase broadcast for CACHE, END, START
+      this.broadcastEndTurnPhases(state);
+    } else if (ctx === "end") {
+      // Already resolved END effects
+      finishTurn(state);
+      this.flushEffectLogs();
+      if (state.turnPhase !== TurnPhase.EffectResolution) {
+        this.checkWin();
+        if (this.gameState) {
+          const nextPlayer = this.gameState.activePlayerIndex;
+          this.logger?.log("TURN", `Turn ${this.gameState.turnNumber} — active: P${nextPlayer} (${this.players[nextPlayer]?.username})`);
+        }
+      }
+      this.broadcastState();
+    } else if (ctx === "start") {
+      processAutoPhases(state);
+      this.broadcastState();
+    }
+  }
 
-    if (state.turnPhase !== TurnPhase.EffectResolution) {
-      this.checkWin();
-      if (this.gameState) {
-        const nextPlayer = this.gameState.activePlayerIndex;
-        this.logger?.log("TURN", `Turn ${this.gameState.turnNumber} — active: P${nextPlayer} (${this.players[nextPlayer]?.username})`);
+  private broadcastEndTurnPhases(state: ServerGameState): void {
+    // Step 1: Show CACHE phase
+    state.turnPhase = TurnPhase.ClearCache;
+    const pi = state.activePlayerIndex;
+    
+    // Execute cache logic
+    if (state.skipCheckCache) {
+      state.skipCheckCache = false;
+      state.pendingLogs.push("  skip_check_cache: clear-cache discard skipped");
+    } else {
+      const over5 = state.players[pi].hand.length - 5;
+      if (over5 > 0) discardFromHand(state, pi, over5);
+    }
+    
+    // Trigger after_clear_cache_draw passives
+    for (const line of state.players[pi].lines) {
+      for (const card of line.cards) {
+        if (card.face !== CardFace.FaceUp) continue;
+        const def = CARD_MAP.get(card.defId);
+        if (!def) continue;
+        for (const eff of def.effects) {
+          if (eff.trigger === "passive" && eff.type === "after_clear_cache_draw") {
+            const amount = typeof eff.payload?.amount === "number" ? eff.payload.amount : 1;
+            state.pendingLogs.push(`  after_clear_cache_draw (${card.defId}): drawing ${amount}`);
+            drawCards(state, pi, amount);
+          }
+        }
       }
     }
+    
+    this.flushEffectLogs();
     this.broadcastState();
+    
+    // Step 2: After 500ms, show END phase
+    setTimeout(() => {
+      state.turnPhase = TurnPhase.End;
+      
+      // Enqueue END effects
+      for (const line of state.players[pi].lines) {
+        for (const card of line.cards) {
+          if (card.face === CardFace.FaceUp) {
+            enqueueEffectsFromCard(state, pi, card.defId, "end", card.instanceId);
+          }
+        }
+      }
+      
+      this.flushEffectLogs();
+      
+      if (state.effectQueue.length > 0) {
+        // End effects need resolution
+        state.effectQueueContext = "end";
+        state.turnPhase = TurnPhase.EffectResolution;
+        this.broadcastState();
+        return;
+      }
+      
+      this.broadcastState();
+      
+      // Step 3: After another 500ms, show opponent's START phase
+      setTimeout(() => {
+        finishTurn(state);
+        this.flushEffectLogs();
+        
+        if (state.turnPhase !== TurnPhase.EffectResolution) {
+          this.checkWin();
+          if (this.gameState) {
+            const nextPlayer = this.gameState.activePlayerIndex;
+            this.logger?.log("TURN", `Turn ${this.gameState.turnNumber} — active: P${nextPlayer} (${this.players[nextPlayer]?.username})`);
+          }
+        }
+        this.broadcastState();
+      }, 500);
+    }, 500);
   }
 
   private checkWin(): void {

@@ -385,7 +385,7 @@ export function endTurn(state: ServerGameState): void {
 /** Advance the turn counter, switch active player, enqueue Start effects.
  *  Pauses at EffectResolution if there are start effects to show, else
  *  calls processAutoPhases to continue to Action/CompileChoice. */
-function finishTurn(state: ServerGameState): void {
+export function finishTurn(state: ServerGameState): void {
   state.revealOpponentHandFor = null;
   state.revealHandCardFor = null;
   state.pendingControlReorder = null;

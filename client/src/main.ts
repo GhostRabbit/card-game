@@ -20,4 +20,29 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [MenuScene, DraftScene, GameScene, MockGameScene, GameOverScene],
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+// Expose Phaser game instance for testing (E2E tests need this to control scene transitions)
+(window as any).__PHASER_GAME__ = game;
+
+// Check for test mode query parameter
+const urlParams = new URLSearchParams(window.location.search);
+const isTestMode = urlParams.has('test') && urlParams.get('test') === '1';
+
+// Override the scene startup based on test mode
+if (isTestMode) {
+  // In test mode, stop the auto-started MenuScene and start MockGameScene instead
+  game.events.once('ready', () => {
+    if (game.scene.isActive('MenuScene')) {
+      game.scene.stop('MenuScene');
+    }
+    game.scene.start('MockGameScene');
+  });
+} else {
+  // Normal mode: ensure MenuScene is started (it should auto-start anyway)
+  game.events.once('ready', () => {
+    if (!game.scene.isActive('MenuScene')) {
+      game.scene.start('MenuScene');
+    }
+  });
+}

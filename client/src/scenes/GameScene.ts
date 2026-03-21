@@ -21,6 +21,7 @@ export class GameScene extends Phaser.Scene {
   private myIndex: 0 | 1 = 0;
   private view!: PlayerView;
   private turnPhase!: TurnPhase;
+  private previousTurnPhase!: TurnPhase;
   private devMode = false;
 
   private selectedCard: CardView | null = null;
@@ -38,6 +39,7 @@ export class GameScene extends Phaser.Scene {
   private hudGroup!: Phaser.GameObjects.Group;
   /** Persistent right-panel: only cleared when hovered card changes. */
   private focusPanelGroup!: Phaser.GameObjects.Group;
+  private testIdOverlay?: HTMLElement;
 
   constructor() {
     super("GameScene");
@@ -47,6 +49,7 @@ export class GameScene extends Phaser.Scene {
     this.myIndex = data.myIndex ?? 0;
     this.view    = data.initialPayload.view;
     this.turnPhase = data.initialPayload.turnPhase;
+    this.previousTurnPhase = -1 as any; // Initialize to impossible value to trigger animation on first sync
     this.devMode = data.devMode ?? false;
   }
 
@@ -63,6 +66,8 @@ export class GameScene extends Phaser.Scene {
 
     socket.on("state_sync", ({ view, turnPhase }) => {
       this.view = view;
+      const phaseChanged = this.turnPhase !== turnPhase;
+      this.previousTurnPhase = this.turnPhase;
       this.turnPhase = turnPhase;
       this.selectedCard = null;
       this.faceDownMode = false;
@@ -70,7 +75,12 @@ export class GameScene extends Phaser.Scene {
       this.effectHandTargetId = null;
       this.controlReorderWhose = null;
       this.controlReorderPicks = [];
-      this.renderAll();
+      
+      if (phaseChanged) {
+        this.animatePhaseTransition();
+      } else {
+        this.renderAll();
+      }
     });
 
     socket.on("action_rejected", ({ reason }) => {
@@ -120,22 +130,88 @@ export class GameScene extends Phaser.Scene {
     const focusPanelW = 240;
     const focusPanelCx = lineCx[2] + zoneW / 2 + 10 + focusPanelW / 2;
 
-    // Pile sits at the far right of the 1600px canvas
-    const pileCx = W - pileW / 2 - 10;
-
-    // ── Controls (under focused card in right panel) ───────────────────────
-    const focusCardBottom = H / 2 + 140; // focused card is 280px tall at panel centre
-    const btnCx     = focusPanelCx;
-    const resetY    = focusCardBottom + 44;
-    const faceDownY = focusCardBottom + 90;
+    // Pile sits immediately right of the focus panel with minimal gap
+    const pileCx = focusPanelCx + focusPanelW / 2 + 10 + pileW / 2;
 
     // ── Hand strip ──────────────────────────────────────────────────────────
     const handY     = H - Math.round(CardSprite.HEIGHT / 2) - 10;
+
+    // ── Controls (aligned in height with hand cards) ─────────────────────────
+    const btnCx     = focusPanelCx;
+    const resetY    = handY - 50;
+    const faceDownY = handY + 10;
     // Hand is constrained to the board area left of the focus panel
     const handLeft  = 30;
     const handRight = focusPanelCx - focusPanelW / 2 - 20;
 
     return { W, H, zoneW, zoneH, pileW, stripH, hudH, lineCx, oppCy, ownCy, midY, pileCx, btnCx, resetY, faceDownY, handY, handLeft, handRight, focusPanelCx, focusPanelW };
+  }
+
+  private ensureTestIdOverlay(): void {
+    if (this.testIdOverlay) {
+      return;
+    }
+
+    const existing = document.getElementById('phaser-testid-overlay');
+    if (existing instanceof HTMLElement) {
+      this.testIdOverlay = existing;
+    } else {
+      const overlay = document.createElement('div');
+      overlay.id = 'phaser-testid-overlay';
+      overlay.dataset.testid = 'game-container';
+      Object.assign(overlay.style, {
+        position: 'absolute',
+        inset: '0',
+        pointerEvents: 'none',
+        zIndex: '9999',
+        opacity: '0',
+      });
+      document.body.appendChild(overlay);
+      this.testIdOverlay = overlay;
+    }
+  }
+
+  private syncTestIdOverlay(): void {
+    if (!this.devMode) return;
+    this.ensureTestIdOverlay();
+    if (!this.testIdOverlay) return;
+
+    const canvas = this.sys.game.canvas;
+    const canvasRect = canvas.getBoundingClientRect();
+
+    const overlay = this.testIdOverlay;
+    if (!overlay) return;
+
+    overlay.innerHTML = '';
+
+    this.children.list.forEach((go: any) => {
+      const testid = typeof go.getData === 'function' ? go.getData('testid') : undefined;
+      if (!testid) return;
+
+      const el = document.createElement('div');
+      el.dataset.testid = testid;
+      el.style.position = 'absolute';
+      el.style.pointerEvents = 'none';
+      el.style.opacity = '0';
+
+      if (typeof go.getBounds === 'function') {
+        try {
+          const bounds = go.getBounds();
+          if (bounds) {
+            const x = bounds.x + canvasRect.left;
+            const y = bounds.y + canvasRect.top;
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+            el.style.width = `${Math.max(bounds.width, 2)}px`;
+            el.style.height = `${Math.max(bounds.height, 2)}px`;
+          }
+        } catch {
+          // keep default fallback styling
+        }
+      }
+
+      this.testIdOverlay.appendChild(el);
+    });
   }
 
   private renderAll(): void {
@@ -147,6 +223,7 @@ export class GameScene extends Phaser.Scene {
     this.renderHUD();
     this.renderBoard();
     this.renderHand();
+    this.syncTestIdOverlay();
   }
 
   private renderHUD(): void {
@@ -174,13 +251,17 @@ export class GameScene extends Phaser.Scene {
     const activeState = this.activeTurnState();
     const cellW = 98;
     const rowY = 18;
-    const rowStartX = L.W / 2 - ((turnStates.length - 1) * cellW) / 2;
+    const rowStartX = L.lineCx[1] - ((turnStates.length - 1) * cellW) / 2;
     turnStates.forEach((state, i) => {
       const cx = rowStartX + i * cellW;
       const isActive = state === activeState;
       const chip = this.add.rectangle(cx, rowY, 90, 24, isActive ? 0x19314a : 0x0b1420)
         .setStrokeStyle(1.5, isActive ? hudAccentNum : 0x25364a)
-        .setInteractive({ useHandCursor: true });
+        .setInteractive({ useHandCursor: true })
+        .setName(`phase-${state}`)
+        .setData("testid", `phase-${state}`)
+        .setData("phase", state)
+        .setData("isActive", isActive);
       chip.on("pointerover", () => {
         chip.setFillStyle(isActive ? 0x21405f : 0x132337);
         this.showFocusTurnState(state);
@@ -193,7 +274,9 @@ export class GameScene extends Phaser.Scene {
       addHud(this.add.text(cx, rowY, state, {
         fontSize: "11px", fontFamily: "monospace", fontStyle: "bold",
         color: isActive ? hudAccentColor : "#6f8da8",
-      }).setOrigin(0.5));
+      }).setOrigin(0.5)
+        .setName(`phase-text-${state}`)
+        .setData("testid", `phase-text-${state}`));
     });
 
     // ── Effect resolution ─────────────────────────────────────────────────────
@@ -489,12 +572,6 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    addHud(this.add.text(L.W / 2, 36,
-      isCompileChoice ? "COMPILE REQUIRED" : myTurn ? "YOUR TURN" : "Opponent's Turn", {
-        fontSize: "16px", fontFamily: "monospace",
-        color: isCompileChoice ? "#ffcc00" : myTurn ? hudAccentColor : "#445566", fontStyle: "bold",
-      }).setOrigin(0.5));
-
     // Bonus play banner
     if (this.view.pendingBonusPlay && myTurn) {
       addHud(this.add.text(L.W / 2, 72,
@@ -534,7 +611,9 @@ export class GameScene extends Phaser.Scene {
       const toggleBg = this.add.rectangle(L.btnCx, L.faceDownY, 160, 38,
         isOn ? 0x0d2a4a : 0x0a1520)
         .setStrokeStyle(2, isOn ? hudAccentNum : 0x2255aa)
-        .setInteractive({ useHandCursor: true });
+        .setInteractive({ useHandCursor: true })
+        .setName("toggle-face-down")
+        .setData("testid", "toggle-face-down");
       toggleBg.on("pointerover", () => toggleBg.setFillStyle(isOn ? 0x163a5e : 0x0f2030));
       toggleBg.on("pointerout",  () => toggleBg.setFillStyle(isOn ? 0x0d2a4a : 0x0a1520));
       toggleBg.on("pointerdown", () => {
@@ -546,7 +625,9 @@ export class GameScene extends Phaser.Scene {
         isOn ? "▼  FACE-DOWN  ON" : "▽  FACE-DOWN  OFF", {
           fontSize: "14px", fontFamily: "monospace", fontStyle: "bold",
           color: isOn ? hudAccentColor : "#4477aa",
-        }).setOrigin(0.5));
+        }).setOrigin(0.5)
+        .setName("toggle-face-down-text")
+        .setData("testid", "toggle-face-down-text"));
 
       // ── Reset button ──────────────────────────────────────────────────────
       const canReset = this.view.hand.length < 5;
@@ -554,7 +635,9 @@ export class GameScene extends Phaser.Scene {
       const resetLabel = canReset ? `⟳  RESET  (+${drawCount})` : "⟳  RESET  (full)";
       const refreshBg = this.add.rectangle(L.btnCx, L.resetY, 160, 38,
         canReset ? 0x0d2035 : 0x080e14)
-        .setStrokeStyle(2, canReset ? hudAccentNum : 0x1a2a3a);
+        .setStrokeStyle(2, canReset ? hudAccentNum : 0x1a2a3a)
+        .setName("reset-button")
+        .setData("testid", "reset-button");
       if (canReset) {
         refreshBg.setInteractive({ useHandCursor: true });
         refreshBg.on("pointerover", () => refreshBg.setFillStyle(0x163050));
@@ -565,7 +648,23 @@ export class GameScene extends Phaser.Scene {
       addHud(this.add.text(L.btnCx, L.resetY, resetLabel, {
         fontSize: "14px", fontFamily: "monospace", fontStyle: "bold",
         color: canReset ? hudAccentColor : "#2a3f55",
-      }).setOrigin(0.5));
+      }).setOrigin(0.5)
+        .setName("reset-button-text")
+        .setData("testid", "reset-button-text"));
+
+      // Status text below reset/face buttons
+      addHud(this.add.text(L.btnCx, L.faceDownY + 50,
+        isCompileChoice ? "COMPILE REQUIRED" : myTurn ? "YOUR TURN" : "Opponent's Turn", {
+          fontSize: "28px", fontFamily: "monospace",
+          color: isCompileChoice ? "#ffcc00" : myTurn ? hudAccentColor : "#445566", fontStyle: "bold",
+        }).setOrigin(0.5));
+    } else {
+      // Opponent's turn — show status centered at top
+      addHud(this.add.text(L.W / 2, 36,
+        "Opponent's Turn", {
+          fontSize: "16px", fontFamily: "monospace",
+          color: "#445566", fontStyle: "bold",
+        }).setOrigin(0.5));
     }
     if (this.view.opponentHandRevealed) {
       const revNames = this.view.opponentHandRevealed.map(c => CLIENT_CARD_DEFS.get(c.defId)?.name ?? c.defId).join(", ");
@@ -599,8 +698,8 @@ export class GameScene extends Phaser.Scene {
       } else {
         hint = "Face-up: click a GREEN line zone that matches the card's protocol ↓";
       }
-      addHud(this.add.text(L.W / 2, 54, hint, {
-        fontSize: "11px", fontFamily: "monospace", color: "#7799bb",
+      addHud(this.add.text(L.lineCx[1], 54, hint, {
+        fontSize: "26px", fontFamily: "monospace", color: "#7799bb",
       }).setOrigin(0.5));
     }
   }
@@ -844,19 +943,28 @@ export class GameScene extends Phaser.Scene {
     const stackCx = cx + 32;
 
     // Background panel
+    const isMine = label.includes("MY");
     this.boardGroup.add(
-      this.add.rectangle(cx, cy, pileW, pileH, 0x080d15).setStrokeStyle(1, 0x223344), true);
+      this.add.rectangle(cx, cy, pileW, pileH, 0x080d15)
+        .setStrokeStyle(1, 0x223344)
+        .setName(isMine ? "draw-pile" : "opponent-draw-pile")
+        .setData("testid", isMine ? "draw-pile" : "opponent-draw-pile"), true);
     // Label
     this.boardGroup.add(
       this.add.text(cx, topY + 6, label, {
         fontSize: "9px", fontFamily: "monospace", color: labelColor, fontStyle: "bold",
-      }).setOrigin(0.5, 0), true);
+      }).setOrigin(0.5, 0)
+        .setName(isMine ? "draw-pile-label-text" : "opponent-draw-pile-label-text")
+        .setData("testid", isMine ? "draw-pile-label-text" : "opponent-draw-pile-label-text"), true);
     // Hand size (opponent pile only)
     if (handSize !== undefined) {
       this.boardGroup.add(
         this.add.text(cx, topY + 18, `hand: ${handSize}`, {
           fontSize: "11px", fontFamily: "monospace", color: "#cc8855", fontStyle: "bold",
-        }).setOrigin(0.5, 0), true);
+        }).setOrigin(0.5, 0)
+          .setName("opponent-hand-size")
+          .setData("testid", "opponent-hand-size")
+          .setData("handSize", handSize), true);
     }
 
     // Divider between left draw-count lane and right discard stack lane
@@ -867,11 +975,16 @@ export class GameScene extends Phaser.Scene {
     this.boardGroup.add(
       this.add.text(leftX, cy - 16 + drawYOffset, String(deckSize), {
         fontSize: "40px", fontFamily: "monospace", color: "#4499cc", fontStyle: "bold",
-      }).setOrigin(0.5), true);
+      }).setOrigin(0.5)
+        .setName(isMine ? "draw-pile-count" : "opponent-draw-pile-count")
+        .setData("testid", isMine ? "draw-pile-count" : "opponent-draw-pile-count")
+        .setData("deckSize", deckSize), true);
     this.boardGroup.add(
       this.add.text(leftX, cy + 20 + drawYOffset, "draw", {
         fontSize: "9px", fontFamily: "monospace", color: "#2a5577",
-      }).setOrigin(0.5, 0), true);
+      }).setOrigin(0.5, 0)
+        .setName(isMine ? "draw-pile-label" : "opponent-draw-pile-label")
+        .setData("testid", isMine ? "draw-pile-label" : "opponent-draw-pile-label"), true);
 
     // Discard card stack (right side gets more vertical room)
     if (cards.length === 0) {
@@ -919,7 +1032,11 @@ export class GameScene extends Phaser.Scene {
 
     const zoneBg = this.add.rectangle(cx, cy, zoneW, zoneH,
       validity === "valid" ? 0x12271a : compiled ? 0x001a0e : 0x080d15)
-      .setStrokeStyle(borderWidth, borderColor);
+      .setStrokeStyle(borderWidth, borderColor)
+      .setName(isOwn ? `own-line-${li}` : `opponent-line-${li}`)
+      .setData("testid", isOwn ? "own-line" : "opponent-line")
+      .setData("line", li)
+      .setData("isOwn", isOwn);
 
     if (validity !== "none" && onClick) {
       zoneBg.setInteractive({ useHandCursor: validity === "valid" });
@@ -952,7 +1069,12 @@ export class GameScene extends Phaser.Scene {
       const isCovered = i < n - 1;
       const cardCy    = topCardCy - (n - 1 - i) * stepPx;
       const sprite    = new CardSprite(this, cx, cardCy, card, CLIENT_CARD_DEFS, isCovered);
-      sprite.setScale(cardScale);
+      sprite.setScale(cardScale)
+        .setName("board-card")
+        .setData("testid", "board-card")
+        .setData("line", li)
+        .setData("position", i)
+        .setData("isOwn", isOwn);
       const isTarget = isCardEffectTarget && onCardClick && isCardEffectTarget(card, i, n);
       if (isTarget) {
         sprite.makeEffectTarget((c) => onCardClick!(c));
@@ -1018,6 +1140,10 @@ export class GameScene extends Phaser.Scene {
     hand.forEach((card, i) => {
       const x = startX + i * spacing;
       const sprite = new CardSprite(this, x, L.handY, card, CLIENT_CARD_DEFS);
+      sprite.setName("card-in-hand")
+        .setData("testid", "card-in-hand")
+        .setData("cardIndex", i)
+        .setData("cardId", "instanceId" in card ? (card as CardInstance).instanceId : undefined);
       this.handGroup.add(sprite, true);
 
       const isSelected = this.selectedCard !== null &&
@@ -1302,6 +1428,45 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private animatePhaseTransition(): void {
+    // Render to show the new phase state
+    this.renderAll();
+
+    // Schedule the phase highlight animation after render completes
+    this.time.delayedCall(10, () => {
+      const activeState = this.activeTurnState();
+      this.pulsePhaseChip(activeState);
+    });
+  }
+
+  private pulsePhaseChip(state: "START" | "CONTROL" | "COMPILE" | "ACTION" | "CACHE" | "END"): void {
+    // Find the phase chip for this state in the HUD group
+    const turnStates = ["START", "CONTROL", "COMPILE", "ACTION", "CACHE", "END"] as const;
+    const stateIndex = turnStates.indexOf(state);
+    
+    if (stateIndex === -1) return;
+
+    // Find the chip rectangle (every state has 2 objects: rectangle + text, in pairs)
+    const chipIndex = stateIndex * 2; // rect and text pairs
+    const chip = this.hudGroup.getChildren()[chipIndex] as Phaser.GameObjects.Rectangle;
+    
+    if (!chip || !chip.setFillStyle) return;
+
+    // Phase chip colors
+    const activeFill = 0x19314a;   // Normal active fill
+    const brightFill = 0x3a75cf;   // Bright flash for pulse
+
+    // Pulse animation: bright flash then back to normal
+    this.tweens.add({
+      targets: chip,
+      fillColor: brightFill,
+      duration: 150,
+      ease: Phaser.Math.Easing.Quadratic.Out,
+      yoyo: true,
+      hold: 350,
+    });
+  }
+
   // ── Focus card panel ──────────────────────────────────────────────────────
 
   private showFocusTurnState(state: "START" | "CONTROL" | "COMPILE" | "ACTION" | "CACHE" | "END"): void {
@@ -1316,34 +1481,29 @@ export class GameScene extends Phaser.Scene {
     };
 
     add(this.add.rectangle(cx, H / 2, pw, H, 0x070b11).setStrokeStyle(1, 0x18283a));
-    add(this.add.text(cx, 10, "TURN STATE", {
+    add(this.add.text(cx, 30, "PHASE", {
       fontSize: "11px", fontFamily: "monospace", color: "#2a4d72", fontStyle: "bold",
     }).setOrigin(0.5, 0));
 
     const summaries: Record<typeof state, string> = {
-      START: "Start-of-turn effects and setup resolve.",
-      CONTROL: "Check who controls at least two lines and assign control token.",
-      COMPILE: "If any line can compile, you must choose one to compile.",
-      ACTION: "Play cards and resolve card/effect interactions.",
-      CACHE: "Temporary per-turn effect memory is cleared.",
+      START: "Start-of-turn effects resolve.",
+      CONTROL: "Check whether you have control in at least two lines, if so, take the Control token.",
+      COMPILE: "If any line can compile, you must choose one to compile, then pass the turn.",
+      ACTION: "Play card and resolve card/effect interactions, or reset hand.",
+      CACHE: "Discard down to a hand size of five.",
       END: "End-of-turn effects resolve, then turn passes.",
     };
 
-    add(this.add.text(cx, H / 2 - 110, state, {
-      fontSize: "30px", fontFamily: "monospace", fontStyle: "bold", color: "#9ec7ea",
+    add(this.add.text(cx, H / 2 - 80, state, {
+      fontSize: "28px", fontFamily: "monospace", fontStyle: "bold", color: "#9ec7ea",
     }).setOrigin(0.5));
 
-    add(this.add.text(cx, H / 2 - 58, `Current: ${this.activeTurnState()}`, {
-      fontSize: "12px", fontFamily: "monospace", color: state === this.activeTurnState() ? "#ffe27a" : "#6f8da8",
-      fontStyle: state === this.activeTurnState() ? "bold" : "normal",
-    }).setOrigin(0.5));
-
-    add(this.add.text(cx, H / 2 - 16, summaries[state], {
+    add(this.add.text(cx, H / 2 - 10, summaries[state], {
       fontSize: "13px",
       fontFamily: "monospace",
       color: "#a9bfcd",
       align: "center",
-      wordWrap: { width: pw - 30 },
+      wordWrap: { width: pw - 20 },
     }).setOrigin(0.5, 0));
   }
 

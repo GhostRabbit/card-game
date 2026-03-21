@@ -10,9 +10,16 @@ build/
 # Vite cache
 .vite/
 
-# Test coverage
+# Test coverage and results
 coverage/
 .nyc_output/
+test-results/
+test-results-latest/
+playwright/
+
+# Playwright
+.auth/
+
 
 # Environment files
 .env
