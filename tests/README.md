@@ -1,6 +1,17 @@
 # E2E Testing with Playwright
 
-This directory contains end-to-end (E2E) tests for the Compile game using Playwright. The tests verify game mechanics, UI interactions, and multiplayer synchronization through the user interface.
+This directory contains Playwright tests for the Compile game.
+
+## Test Organization
+
+All tests are located in `tests/` and named with `*.e2e.spec.ts` pattern:
+
+- **`card-interactions.e2e.spec.ts`** - Card selection, playing, and hand management
+- **`game-flow.e2e.spec.ts`** - Game phase progression and effect handling
+- **`multiplayer.e2e.spec.ts`** - Multiplayer state synchronization
+- **`ui-elements.e2e.spec.ts`** - Visual UI element rendering and layout
+- **`card-effects.e2e.spec.ts`** - Effect-decision UX (uses mock scenes via `/?test=1&effect=TYPE`)
+- **`helpers/`** - Shared test utilities (page object model, fixtures)
 
 ## Setup
 
@@ -16,100 +27,82 @@ This will install `@playwright/test` and other dependencies.
 
 ### Configuration
 
-The Playwright configuration is in `playwright.config.ts` at the root of the project. Key settings:
+The Playwright configuration is in `playwright.config.ts` at the root of the project.
 
-- **Web Servers**: Automatically starts both client (port 5173) and server (port 3000) before running tests
-- **Base URL**: Tests target `http://localhost:5173`
+Key settings:
+- **Test Directory**: `./tests` (all `*.e2e.spec.ts` files)
+- **Web Servers**: Automatically starts client (port 5273) and server (port 3100) before running tests
+- **Base URL**: Tests target `http://localhost:5273` (separate from dev ports)
 - **Browsers**: Tests run in Chromium (headless by default)
-- **Artifacts**: Test results, screenshots, and videos save to `test-results/`
-- **Parallel Execution**: Supports running multiple test instances on alternate ports
+- **Artifacts**: Test results save to `test-results-latest/`
 
 ## Running Tests
 
-### Standard Test Execution
+### All Tests
 ```bash
-npm run test:e2e              # Standard headless mode
+npm run test:e2e              # Standard headless mode (discovers all *.e2e.spec.ts)
 npm run test:e2e:headed      # See browser window
 npm run test:e2e:ui          # Interactive UI mode (recommended for debugging)
 npm run test:e2e:debug       # Step-by-step debugging with Inspector
 ```
 
-### Parallel Test Execution (Exploratory)
-
-Run multiple test instances in parallel on separate client/server ports:
-
-```bash
-# Run 2 separate game instances in parallel
-npm run test:e2e:parallel:2
-
-# Run 3 separate game instances in parallel (default)
-npm run test:e2e:parallel:3
-
-# Run 4 separate game instances in parallel
-npm run test:e2e:parallel:4
-
-# Interactive UI mode with parallel execution (2 instances)
-npm run test:e2e:parallel:ui
-```
-
-**How Parallel Execution Works:**
-- Each test instance runs on its own client port (5173, 5273, 5373, etc.)
-- Each test instance runs on its own server port (3000, 3100, 3200, etc.)
-- Tests run concurrently without interfering with each other
-- Each instance gets its own independent game state
-- Useful for exploratory testing, load testing, and multi-player scenario testing
-
-**Port Mapping:**
-```
-Instance 0: Client 5173, Server 3000  (standard ports)
-Instance 1: Client 5273, Server 3100  (parallel:2 adds this)
-Instance 2: Client 5373, Server 3200  (parallel:3 adds this)
-Instance 3: Client 5473, Server 3300  (parallel:4 adds this)
-```
-
 ### Run Specific Test File
 ```bash
-npx playwright test tests/e2e/card-interactions.spec.ts
+npx playwright test tests/card-effects.e2e.spec.ts
+npx playwright test tests/card-interactions.e2e.spec.ts
 ```
 
 ### Run Specific Test
 ```bash
-npx playwright test tests/e2e/card-interactions.spec.ts -g "should select card"
+npx playwright test tests/card-interactions.e2e.spec.ts -g "should select card"
 ```
+
+### Play Button Support
+All test files support VS Code's Playwright extension play buttons for easy execution and debugging.
 
 ## Test Structure
 
-Tests are organized in the `tests/e2e/` directory:
-
-### `card-interactions.spec.ts`
-**Purpose**: Card selection, playing, and hand management
+### `card-interactions.e2e.spec.ts`
 - Card selection and display
 - Playing cards face-up to lines
 - Playing cards face-down
 - Hand reset functionality
 - Line value tracking
+- Phase transitions
 
-### `game-flow.spec.ts`
-**Purpose**: Game phase progression and card effects
-- Compile flow and phase transitions
+### `game-flow.e2e.spec.ts`
+- Compile flow and phase progression
 - Effect resolution and skipping
 - Turn end and opponent turn display
 
-### `multiplayer.spec.ts`
-**Purpose**: Multiplayer game state synchronization
-- Turn switching
+### `multiplayer.e2e.spec.ts`
+- Turn switching and state synchronization
 - Opponent board state updates
 - Hand size changes on sync
 - Draw and discard pile tracking
 - Network resilience
 
-### `ui-elements.spec.ts`
-**Purpose**: Visual UI element rendering and layout
-- Panel visibility
+### `ui-elements.e2e.spec.ts`
+- Panel visibility and rendering
 - Phase information display
 - Control button accessibility
 - Information panel content
 - Responsive layout
+
+### `card-effects.e2e.spec.ts`
+Mock-scene UI contract tests for effect-decision UX:
+- **Auto-execute effects** (no user interaction needed)
+  - draw, flip_self, opponent_discard, deny_compile
+- **Discard from hand** (requires hand card selection)
+- **Board-pick effects** (requires line/card selection)
+  - flip, flip_optional, delete, return
+- **Shift effect** (two-stage board→line selection)
+- **Hand-pick effects** (requires hand card selection)
+  - exchange_hand, give_to_draw, reveal_own_hand
+- **Two-stage effects** (hand/board selection with confirmation)
+  - discard_to_flip, play_facedown, rearrange_protocols
+
+**Note**: Tests use `/?test=1&effect=TYPE` URL parameters to load pre-seeded mock scenarios.
 
 ## Helper Files
 

@@ -13,11 +13,18 @@ interface GameSceneData {
   initialPayload: { view: PlayerView; turnPhase: TurnPhase };
   myIndex: 0 | 1;
   devMode?: boolean;
+  mockEffectType?: string;
+}
+
+interface HudStatusText {
+  id: string;
+  text: string;
 }
 
 const LINE_COLORS = [0x2200aa, 0x008822, 0xaa6600];
 
 export class GameScene extends Phaser.Scene {
+  private static readonly PHASE_HIGHLIGHT_MS = 500;
   private myIndex: 0 | 1 = 0;
   private view!: PlayerView;
   private turnPhase!: TurnPhase;
@@ -40,6 +47,16 @@ export class GameScene extends Phaser.Scene {
   /** Persistent right-panel: only cleared when hovered card changes. */
   private focusPanelGroup!: Phaser.GameObjects.Group;
   private testIdOverlay?: HTMLElement;
+  private phaseIntroTimers: Phaser.Time.TimerEvent[] = [];
+  private mockEffectMode = false;
+  private injectedEffect: PendingEffect | null = null;
+    private phaseGlow: Phaser.GameObjects.Rectangle | null = null;
+
+  private publishHudStatusTexts(entries: HudStatusText[]): void {
+    if (!this.devMode) return;
+    (window as any).__GAME_STATUS_TEXTS__ = entries;
+    (window as any).__GAME_STATUS_TEXT_MAP__ = Object.fromEntries(entries.map((e) => [e.id, e.text]));
+  }
 
   constructor() {
     super("GameScene");
@@ -51,6 +68,8 @@ export class GameScene extends Phaser.Scene {
     this.turnPhase = data.initialPayload.turnPhase;
     this.previousTurnPhase = -1 as any; // Initialize to impossible value to trigger animation on first sync
     this.devMode = data.devMode ?? false;
+    this.mockEffectMode = this.devMode && !!data.mockEffectType;
+    this.injectedEffect = data.initialPayload.view.pendingEffect ?? null;
   }
 
   create(): void {
@@ -63,8 +82,22 @@ export class GameScene extends Phaser.Scene {
 
     this.showFocusCard(null);
     this.renderAll();
+    this.maybePlayInitialPhaseIntro();
+
+    if (this.mockEffectMode && this.injectedEffect && this.turnPhase === TurnPhase.Action) {
+      // In effect-test mode, mimic entering EffectResolution from ACTION.
+      this.time.delayedCall(120, () => {
+        this.view.pendingEffect = this.injectedEffect;
+        this.turnPhase = TurnPhase.EffectResolution;
+        this.renderAll();
+      });
+    }
 
     socket.on("state_sync", ({ view, turnPhase }) => {
+      if (this.mockEffectMode) {
+        return;
+      }
+      this.clearPhaseIntroTimers();
       this.view = view;
       const phaseChanged = this.turnPhase !== turnPhase;
       this.previousTurnPhase = this.turnPhase;
@@ -82,6 +115,8 @@ export class GameScene extends Phaser.Scene {
         this.renderAll();
       }
     });
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.clearPhaseIntroTimers());
 
     socket.on("action_rejected", ({ reason }) => {
       this.showToast(reason, "#ff6666");
@@ -194,6 +229,12 @@ export class GameScene extends Phaser.Scene {
       el.style.pointerEvents = 'none';
       el.style.opacity = '0';
 
+      // Mirror visible Phaser text into the hidden DOM test overlay so
+      // Playwright text assertions read the same value shown on-screen.
+      if (typeof go.text === 'string') {
+        el.textContent = go.text;
+      }
+
       if (typeof go.getBounds === 'function') {
         try {
           const bounds = go.getBounds();
@@ -210,7 +251,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      this.testIdOverlay.appendChild(el);
+      overlay.appendChild(el);
     });
   }
 
@@ -228,6 +269,10 @@ export class GameScene extends Phaser.Scene {
 
   private renderHUD(): void {
     const L = this.computeLayout();
+    const hudStatusTexts: HudStatusText[] = [];
+    const noteStatus = (id: string, text: string) => {
+      hudStatusTexts.push({ id, text });
+    };
     const addHud = (go: Phaser.GameObjects.GameObject) => {
       this.hudGroup.add(go, true);
       (go as unknown as Phaser.GameObjects.Components.Depth).setDepth?.(100);
@@ -255,25 +300,31 @@ export class GameScene extends Phaser.Scene {
     turnStates.forEach((state, i) => {
       const cx = rowStartX + i * cellW;
       const isActive = state === activeState;
-      const chip = this.add.rectangle(cx, rowY, 90, 24, isActive ? 0x19314a : 0x0b1420)
-        .setStrokeStyle(1.5, isActive ? hudAccentNum : 0x25364a)
+      // Bright when it's our turn, murky when it's the opponent's turn
+      const activeFill   = myTurn ? 0x19314a : 0x0f1e2a;
+      const activeStroke = myTurn ? hudAccentNum : 0x2a4060;
+      const activeHover  = myTurn ? 0x21405f : 0x162030;
+      const activeTextColor = myTurn ? hudAccentColor : "#4a6a88";
+      const chip = this.add.rectangle(cx, rowY, 90, 24, isActive ? activeFill : 0x0b1420)
+        .setStrokeStyle(1.5, isActive ? activeStroke : 0x25364a)
         .setInteractive({ useHandCursor: true })
         .setName(`phase-${state}`)
         .setData("testid", `phase-${state}`)
         .setData("phase", state)
-        .setData("isActive", isActive);
+        .setData("isActive", isActive)
+        .setData("phaseActive", isActive ? "true" : "false");
       chip.on("pointerover", () => {
-        chip.setFillStyle(isActive ? 0x21405f : 0x132337);
+        chip.setFillStyle(isActive ? activeHover : 0x132337);
         this.showFocusTurnState(state);
       });
       chip.on("pointerout", () => {
-        chip.setFillStyle(isActive ? 0x19314a : 0x0b1420);
+        chip.setFillStyle(isActive ? activeFill : 0x0b1420);
         this.showFocusCard(null);
       });
       addHud(chip);
       addHud(this.add.text(cx, rowY, state, {
         fontSize: "11px", fontFamily: "monospace", fontStyle: "bold",
-        color: isActive ? hudAccentColor : "#6f8da8",
+        color: isActive ? activeTextColor : "#6f8da8",
       }).setOrigin(0.5)
         .setName(`phase-text-${state}`)
         .setData("testid", `phase-text-${state}`));
@@ -285,23 +336,31 @@ export class GameScene extends Phaser.Scene {
       const oppEffect  = this.view.opponentPendingEffect;
 
       if (myEffect) {
-        addHud(this.add.text(L.W / 2, 36, "RESOLVE EFFECT", {
-          fontSize: "16px", fontFamily: "monospace", color: hudAccentColor, fontStyle: "bold",
-        }).setOrigin(0.5));
-        addHud(this.add.text(L.W / 2, 54, `[${myEffect.cardName}] ${myEffect.description}`, {
-          fontSize: "11px", fontFamily: "monospace", color: "#aaddcc", wordWrap: { width: 500 },
-        }).setOrigin(0.5));
+        const effectDescription = `${myEffect.cardName} ▸ ${myEffect.description}`;
+        noteStatus("effect-description", effectDescription);
+        addHud(this.add.text(L.lineCx[1], 36, effectDescription, {
+          fontSize: "13px", fontFamily: "monospace", color: "#aaddcc", align: "center", wordWrap: { width: 760 },
+        }).setOrigin(0.5)
+          .setName("effect-description")
+          .setData("testid", "effect-description"));
 
         const spec = this.getEffectInputSpec(myEffect);
 
         if (myEffect.type === "discard") {
           if (this.view.hand.length === 0) {
-            addHud(this.add.text(L.W / 2, 72, "(hand is empty — nothing to discard)", {
-              fontSize: "11px", fontFamily: "monospace", color: "#668877",
-            }).setOrigin(0.5));
+            const hint = "(hand is empty — nothing to discard)";
+            noteStatus("effect-hint", hint);
+            addHud(this.add.text(L.lineCx[1], 54, hint, {
+              fontSize: "20px", fontFamily: "monospace", color: "#445566", align: "center",
+              wordWrap: { width: 760 },
+            }).setOrigin(0.5)
+              .setName("effect-hint")
+              .setData("testid", "effect-hint"));
             const btn = this.add.rectangle(L.btnCx, L.resetY, 160, 32, 0x0d2010)
               .setStrokeStyle(2, 0x558866)
-              .setInteractive({ useHandCursor: true });
+              .setInteractive({ useHandCursor: true })
+              .setName("skip-effect-button")
+              .setData("testid", "skip-effect-button");
             btn.on("pointerover", () => btn.setFillStyle(0x1a3322));
             btn.on("pointerout",  () => btn.setFillStyle(0x0d2010));
             btn.on("pointerdown", () => getSocket().emit("resolve_effect", { id: myEffect.id }));
@@ -310,26 +369,43 @@ export class GameScene extends Phaser.Scene {
               fontSize: "13px", fontFamily: "monospace", color: "#558866", fontStyle: "bold",
             }).setOrigin(0.5));
           } else {
-            addHud(this.add.text(L.W / 2, 72, "Click a card in your hand to discard it ↓", {
-              fontSize: "11px", fontFamily: "monospace", color: "#ffcc66",
-            }).setOrigin(0.5));
+            const hint = "Click a card in your hand to discard it ↓";
+            noteStatus("effect-hint", hint);
+            addHud(this.add.text(L.lineCx[1], 54, hint, {
+              fontSize: "20px", fontFamily: "monospace", color: "#7799bb", align: "center",
+              wordWrap: { width: 760 },
+            }).setOrigin(0.5)
+              .setName("effect-hint")
+              .setData("testid", "effect-hint"));
           }
 
         } else if (myEffect.type === "discard_to_flip") {
           if (!this.effectHandTargetId) {
             // Stage 1: choose a hand card to discard (optional)
             if (this.view.hand.length === 0) {
-              addHud(this.add.text(L.W / 2, 72, "(hand is empty — skipping discard)", {
-                fontSize: "11px", fontFamily: "monospace", color: "#668877",
-              }).setOrigin(0.5));
+              const hint = "(hand is empty — skipping discard)";
+              noteStatus("effect-hint", hint);
+              addHud(this.add.text(L.lineCx[1], 54, hint, {
+                fontSize: "20px", fontFamily: "monospace", color: "#445566", align: "center",
+                wordWrap: { width: 760 },
+              }).setOrigin(0.5)
+                .setName("effect-hint")
+                .setData("testid", "effect-hint"));
             } else {
-              addHud(this.add.text(L.W / 2, 72, "Click a card in your hand to discard (you may skip) ↓", {
-                fontSize: "11px", fontFamily: "monospace", color: "#ffcc66",
-              }).setOrigin(0.5));
+              const hint = "Click a card in your hand to discard (you may skip) ↓";
+              noteStatus("effect-hint", hint);
+              addHud(this.add.text(L.lineCx[1], 54, hint, {
+                fontSize: "20px", fontFamily: "monospace", color: "#7799bb", align: "center",
+                wordWrap: { width: 760 },
+              }).setOrigin(0.5)
+                .setName("effect-hint")
+                .setData("testid", "effect-hint"));
             }
             const skipBtn = this.add.rectangle(L.btnCx, L.resetY, 160, 32, 0x0d2010)
               .setStrokeStyle(2, 0x558866)
-              .setInteractive({ useHandCursor: true });
+              .setInteractive({ useHandCursor: true })
+              .setName("skip-effect-button")
+              .setData("testid", "skip-effect-button");
             skipBtn.on("pointerover", () => skipBtn.setFillStyle(0x1a3322));
             skipBtn.on("pointerout",  () => skipBtn.setFillStyle(0x0d2010));
             skipBtn.on("pointerdown", () => getSocket().emit("resolve_effect", { id: myEffect.id }));
@@ -341,32 +417,77 @@ export class GameScene extends Phaser.Scene {
             // Stage 2: the hand card is staged — click a board card to flip
             const hc = this.view.hand.find(c => "instanceId" in c && (c as CardInstance).instanceId === this.effectHandTargetId);
             const handCardName = hc && "defId" in hc ? (CLIENT_CARD_DEFS.get((hc as CardInstance).defId)?.name ?? "Card") : "Card";
-            addHud(this.add.text(L.W / 2, 72, `Discarding ${handCardName} — click a board card to flip ↓`, {
-              fontSize: "11px", fontFamily: "monospace", color: "#aaddcc",
-            }).setOrigin(0.5));
+            const hint = `Discarding ${handCardName} — click a board card to flip ↓`;
+            noteStatus("effect-hint", hint);
+            addHud(this.add.text(L.lineCx[1], 54, hint, {
+              fontSize: "20px", fontFamily: "monospace", color: "#7799bb", align: "center",
+              wordWrap: { width: 760 },
+            }).setOrigin(0.5)
+              .setName("effect-hint")
+              .setData("testid", "effect-hint"));
           }
 
         } else if (myEffect.type === "play_facedown") {
           if (!this.effectHandTargetId) {
-            addHud(this.add.text(L.W / 2, 72, "Click a card in your hand to play face-down ↓", {
-              fontSize: "11px", fontFamily: "monospace", color: "#ffcc66",
-            }).setOrigin(0.5));
+            const hint = "Click a card in your hand to play face-down ↓";
+            noteStatus("effect-hint", hint);
+            addHud(this.add.text(L.lineCx[1], 54, hint, {
+              fontSize: "20px", fontFamily: "monospace", color: "#7799bb", align: "center",
+              wordWrap: { width: 760 },
+            }).setOrigin(0.5)
+              .setName("effect-hint")
+              .setData("testid", "effect-hint"));
           } else {
             const hc = this.view.hand.find(c => "instanceId" in c && (c as CardInstance).instanceId === this.effectHandTargetId);
             const handCardName = hc && "defId" in hc ? (CLIENT_CARD_DEFS.get((hc as CardInstance).defId)?.name ?? "Card") : "Card";
-            addHud(this.add.text(L.W / 2, 72, `Playing ${handCardName} face-down — choose a line:`, {
-              fontSize: "11px", fontFamily: "monospace", color: "#aaddcc",
-            }).setOrigin(0.5));
+            const hint = `Playing ${handCardName} face-down — choose a line:`;
+            noteStatus("effect-hint", hint);
+            addHud(this.add.text(L.lineCx[1], 54, hint, {
+              fontSize: "20px", fontFamily: "monospace", color: "#7799bb", align: "center",
+              wordWrap: { width: 760 },
+            }).setOrigin(0.5)
+              .setName("effect-hint")
+              .setData("testid", "effect-hint"));
             this.renderLinePicker(L.lineCx, addHud, "own", (li) => {
               getSocket().emit("resolve_effect", { id: myEffect.id, targetInstanceId: this.effectHandTargetId!, targetLineIndex: li });
               this.effectHandTargetId = null;
             });
           }
 
+        } else if (spec.handPick) {
+          const pickLabel = myEffect.type === "exchange_hand"
+            ? "Give 1 card from your hand to your opponent ↓"
+            : myEffect.type === "give_to_draw"
+              ? "Give 1 card to your opponent to draw 2 (or skip) ↓"
+              : "Click a card in your hand to reveal ↓";
+          noteStatus("effect-hint", pickLabel);
+          addHud(this.add.text(L.lineCx[1], 54, pickLabel, {
+            fontSize: "20px", fontFamily: "monospace", color: "#7799bb", align: "center",
+            wordWrap: { width: 760 },
+          }).setOrigin(0.5)
+            .setName("effect-hint")
+            .setData("testid", "effect-hint"));
+          if (spec.isOptional) {
+            const handSkipBtn = this.add.rectangle(L.btnCx, L.resetY, 160, 32, 0x0d2010)
+              .setStrokeStyle(2, 0x558866)
+              .setInteractive({ useHandCursor: true })
+              .setName("skip-effect-button")
+              .setData("testid", "skip-effect-button");
+            handSkipBtn.on("pointerover", () => handSkipBtn.setFillStyle(0x1a3322));
+            handSkipBtn.on("pointerout",  () => handSkipBtn.setFillStyle(0x0d2010));
+            handSkipBtn.on("pointerdown", () => getSocket().emit("resolve_effect", { id: myEffect.id }));
+            addHud(handSkipBtn);
+            addHud(this.add.text(L.btnCx, L.resetY, "SKIP", {
+              fontSize: "13px", fontFamily: "monospace", color: "#558866", fontStyle: "bold",
+            }).setOrigin(0.5));
+          }
+
         } else if (spec.isAutoExecute) {
           const btn = this.add.rectangle(L.btnCx, L.resetY, 160, 32, 0x0d2a1a)
             .setStrokeStyle(2, hudAccentNum)
-            .setInteractive({ useHandCursor: true });
+            .setInteractive({ useHandCursor: true })
+            .setName("confirm-effect-button")
+            .setData("testid", "confirm-effect-button");
           btn.on("pointerover", () => btn.setFillStyle(0x1a4a30));
           btn.on("pointerout",  () => btn.setFillStyle(0x0d2a1a));
           btn.on("pointerdown", () => getSocket().emit("resolve_effect", { id: myEffect.id }));
@@ -376,13 +497,56 @@ export class GameScene extends Phaser.Scene {
           }).setOrigin(0.5));
 
         } else if (spec.boardMode && !this.effectBoardTargetId) {
-          addHud(this.add.text(L.W / 2, 72, this.getBoardPickHint(spec.boardMode), {
-            fontSize: "11px", fontFamily: "monospace", color: "#ffcc66",
-          }).setOrigin(0.5));
+          // Check if any valid board targets exist for this effect
+          const allBoardCards: Array<{ card: CardView; pi: 0 | 1; idx: number; total: number }> = [];
+          const ownPi  = this.myIndex;
+          const oppPi  = (1 - this.myIndex) as 0 | 1;
+          for (let li = 0; li < 3; li++) {
+            const ownCards = this.view.lines[li].cards;
+            ownCards.forEach((c, idx) => allBoardCards.push({ card: c, pi: ownPi, idx, total: ownCards.length }));
+            const oppCards = this.view.opponentLines[li].cards;
+            oppCards.forEach((c, idx) => allBoardCards.push({ card: c, pi: oppPi, idx, total: oppCards.length }));
+          }
+          const hasValidTarget = allBoardCards.some(({ card, pi, idx, total }) =>
+            this.isBoardCardValidForEffect(card, pi, idx, total, myEffect)
+          );
+
+          if (!hasValidTarget) {
+            const hint = "No valid targets on the board.";
+            noteStatus("effect-hint", hint);
+            addHud(this.add.text(L.lineCx[1], 54, hint, {
+              fontSize: "20px", fontFamily: "monospace", color: "#445566", align: "center",
+              wordWrap: { width: 760 },
+            }).setOrigin(0.5)
+              .setName("effect-hint")
+              .setData("testid", "effect-hint"));
+            const confirmNoneBtn = this.add.rectangle(L.btnCx, L.resetY, 160, 32, 0x0d2010)
+              .setStrokeStyle(2, 0x558866)
+              .setInteractive({ useHandCursor: true })
+              .setName("skip-effect-button")
+              .setData("testid", "skip-effect-button");
+            confirmNoneBtn.on("pointerover", () => confirmNoneBtn.setFillStyle(0x1a3322));
+            confirmNoneBtn.on("pointerout",  () => confirmNoneBtn.setFillStyle(0x0d2010));
+            confirmNoneBtn.on("pointerdown", () => getSocket().emit("resolve_effect", { id: myEffect.id }));
+            addHud(confirmNoneBtn);
+            addHud(this.add.text(L.btnCx, L.resetY, "CONFIRM NONE", {
+              fontSize: "13px", fontFamily: "monospace", color: "#558866", fontStyle: "bold",
+            }).setOrigin(0.5));
+          } else {
+          const hint = this.getBoardPickHint(spec.boardMode);
+          noteStatus("effect-hint", hint);
+          addHud(this.add.text(L.lineCx[1], 54, hint, {
+            fontSize: "20px", fontFamily: "monospace", color: "#7799bb", align: "center",
+            wordWrap: { width: 760 },
+          }).setOrigin(0.5)
+            .setName("effect-hint")
+            .setData("testid", "effect-hint"));
           if (spec.isOptional) {
             const skipBtn = this.add.rectangle(L.btnCx, L.resetY, 160, 32, 0x0d2010)
               .setStrokeStyle(2, 0x558866)
-              .setInteractive({ useHandCursor: true });
+              .setInteractive({ useHandCursor: true })
+              .setName("skip-effect-button")
+              .setData("testid", "skip-effect-button");
             skipBtn.on("pointerover", () => skipBtn.setFillStyle(0x1a3322));
             skipBtn.on("pointerout",  () => skipBtn.setFillStyle(0x0d2010));
             skipBtn.on("pointerdown", () => {
@@ -394,12 +558,17 @@ export class GameScene extends Phaser.Scene {
               fontSize: "13px", fontFamily: "monospace", color: "#558866", fontStyle: "bold",
             }).setOrigin(0.5));
           }
+          } // end hasValidTarget else
 
         } else if (spec.needsLine) {
-          addHud(this.add.text(L.W / 2, 72,
-            this.effectBoardTargetId ? "Card selected — choose a destination line:" : "Choose a destination line:", {
-              fontSize: "11px", fontFamily: "monospace", color: "#aaddcc",
-            }).setOrigin(0.5));
+          const hint = this.effectBoardTargetId ? "Card selected — choose a destination line:" : "Choose a destination line:";
+          noteStatus("effect-hint", hint);
+          addHud(this.add.text(L.lineCx[1], 54, hint, {
+              fontSize: "20px", fontFamily: "monospace", color: "#7799bb", align: "center",
+              wordWrap: { width: 760 },
+            }).setOrigin(0.5)
+              .setName("effect-hint")
+              .setData("testid", "effect-hint"));
           this.renderLinePicker(L.lineCx, addHud, spec.lineScope!, (li) => {
             getSocket().emit("resolve_effect", {
               id: myEffect.id,
@@ -411,22 +580,28 @@ export class GameScene extends Phaser.Scene {
         }
 
       } else if (oppEffect) {
+        noteStatus("effect-opponent-title", "Opponent resolving...");
         addHud(this.add.text(L.W / 2, 36, "Opponent resolving...", {
           fontSize: "16px", fontFamily: "monospace", color: "#aaaaaa", fontStyle: "bold",
         }).setOrigin(0.5));
-        addHud(this.add.text(L.W / 2, 54, `[${oppEffect.cardName}] ${oppEffect.description}`, {
+        const oppDescription = `[${oppEffect.cardName}] ${oppEffect.description}`;
+        noteStatus("effect-opponent-description", oppDescription);
+        addHud(this.add.text(L.W / 2, 54, oppDescription, {
           fontSize: "11px", fontFamily: "monospace", color: "#667788", wordWrap: { width: 500 },
         }).setOrigin(0.5));
 
       } else if (this.view.pendingControlReorder) {
         // ── Control-reorder bonus ───────────────────────────────────────────
+        noteStatus("control-reorder-title", "★ CONTROL BONUS");
         addHud(this.add.text(L.W / 2, 36, "★ CONTROL BONUS", {
           fontSize: "16px", fontFamily: "monospace", color: "#ffcc00", fontStyle: "bold",
         }).setOrigin(0.5));
 
         if (!this.controlReorderWhose) {
           // Stage 1: choose whose protocols to reorder
-          addHud(this.add.text(L.W / 2, 54, "Choose whose protocols to reorder, or skip:", {
+          const chooseText = "Choose whose protocols to reorder, or skip:";
+          noteStatus("control-reorder-instruction", chooseText);
+          addHud(this.add.text(L.W / 2, 54, chooseText, {
             fontSize: "12px", fontFamily: "monospace", color: "#ccbbaa",
           }).setOrigin(0.5));
 
@@ -462,8 +637,9 @@ export class GameScene extends Phaser.Scene {
           const rawProtos = isOpp ? this.view.opponentProtocols : this.view.protocols;
           const sortedProtos = [...rawProtos].sort((a, b) => a.lineIndex - b.lineIndex);
 
-          addHud(this.add.text(L.W / 2, 54,
-            `Reorder ${isOpp ? "OPPONENT" : "OWN"} protocols — click in desired Line 0 → 1 → 2 order:`, {
+          const reorderText = `Reorder ${isOpp ? "OPPONENT" : "OWN"} protocols — click in desired Line 0 → 1 → 2 order:`;
+          noteStatus("control-reorder-instruction", reorderText);
+          addHud(this.add.text(L.W / 2, 54, reorderText, {
               fontSize: "12px", fontFamily: "monospace", color: isOpp ? "#cc88ff" : "#ffcc00",
             }).setOrigin(0.5));
 
@@ -471,6 +647,7 @@ export class GameScene extends Phaser.Scene {
           const pickNames = this.controlReorderPicks
             .map(id => PROTOCOL_NAMES_CLIENT.get(id) ?? id);
           const preview = [0, 1, 2].map(i => `${i}: ${pickNames[i] ?? "—"}`).join("   ");
+          noteStatus("control-reorder-preview", preview);
           addHud(this.add.text(L.W / 2, 72, preview, {
             fontSize: "13px", fontFamily: "monospace", color: "#aaddcc",
           }).setOrigin(0.5));
@@ -563,21 +740,24 @@ export class GameScene extends Phaser.Scene {
         const msg = this.view.opponentHandRevealed
           ? `OPP HAND REVEALED: ${this.view.opponentHandRevealed.map(c => CLIENT_CARD_DEFS.get(c.defId)?.name ?? c.defId).join(", ") || "(empty)"}`
           : `OPP REVEALED: ${CLIENT_CARD_DEFS.get(this.view.opponentRevealedHandCard!.defId)?.name ?? this.view.opponentRevealedHandCard!.defId} (val ${CLIENT_CARD_DEFS.get(this.view.opponentRevealedHandCard!.defId)?.value ?? "?"}) — see panel →`;
+        noteStatus("opponent-reveal-banner", msg);
         addHud(this.add.text(L.W / 2, 74, msg, {
           fontSize: "11px", fontFamily: "monospace", color: "#ffaa44", wordWrap: { width: 500 },
         }).setOrigin(0.5));
       }
 
       // Show control markers even during EffectResolution
+      this.publishHudStatusTexts(hudStatusTexts);
       return;
     }
 
     // Bonus play banner
     if (this.view.pendingBonusPlay && myTurn) {
-      addHud(this.add.text(L.W / 2, 72,
-        this.view.pendingBonusPlay.anyLine
-          ? "BONUS PLAY — play 1 card in any line"
-          : "BONUS PLAY — play 1 more card", {
+      const bonusText = this.view.pendingBonusPlay.anyLine
+        ? "BONUS PLAY — play 1 card in any line"
+        : "BONUS PLAY — play 1 more card";
+      noteStatus("bonus-play-banner", bonusText);
+      addHud(this.add.text(L.W / 2, 72, bonusText, {
           fontSize: "12px", fontFamily: "monospace", color: "#ffe066", fontStyle: "bold",
         }).setOrigin(0.5));
     }
@@ -585,8 +765,9 @@ export class GameScene extends Phaser.Scene {
     // Controls — below the own discard pile (positions from layout)
     if (isCompileChoice) {
       // Compile-choice UI: one button per compilable line (must compile, can't play)
-      addHud(this.add.text(L.btnCx, L.resetY - 20,
-        "You MUST compile:", {
+      const compileText = "You MUST compile:";
+      noteStatus("compile-choice-instruction", compileText);
+      addHud(this.add.text(L.btnCx, L.resetY - 20, compileText, {
           fontSize: "11px", fontFamily: "monospace", color: "#ccaa00",
         }).setOrigin(0.5));
       this.view.compilableLines.forEach((li, i) => {
@@ -653,55 +834,44 @@ export class GameScene extends Phaser.Scene {
         .setData("testid", "reset-button-text"));
 
       // Status text below reset/face buttons
-      addHud(this.add.text(L.btnCx, L.faceDownY + 50,
-        isCompileChoice ? "COMPILE REQUIRED" : myTurn ? "YOUR TURN" : "Opponent's Turn", {
+      const turnStatusText = isCompileChoice ? "COMPILE REQUIRED" : myTurn ? "YOUR TURN" : "OPPO TURN";
+      noteStatus("your-turn-status", turnStatusText);
+      addHud(this.add.text(L.btnCx, L.faceDownY + 50, turnStatusText, {
           fontSize: "28px", fontFamily: "monospace",
           color: isCompileChoice ? "#ffcc00" : myTurn ? hudAccentColor : "#445566", fontStyle: "bold",
-        }).setOrigin(0.5));
-    } else {
-      // Opponent's turn — show status centered at top
-      addHud(this.add.text(L.W / 2, 36,
-        "Opponent's Turn", {
-          fontSize: "16px", fontFamily: "monospace",
-          color: "#445566", fontStyle: "bold",
-        }).setOrigin(0.5));
+        }).setOrigin(0.5)
+          .setName("your-turn-status")
+          .setData("testid", "your-turn-status"));
     }
     if (this.view.opponentHandRevealed) {
       const revNames = this.view.opponentHandRevealed.map(c => CLIENT_CARD_DEFS.get(c.defId)?.name ?? c.defId).join(", ");
-      addHud(this.add.text(20, 60, `OPP HAND: ${revNames || "(empty)"}`, {
+      const oppHandText = `OPP HAND: ${revNames || "(empty)"}`;
+      noteStatus("opponent-hand-status", oppHandText);
+      addHud(this.add.text(20, 60, oppHandText, {
         fontSize: "10px", fontFamily: "monospace", color: "#ffaa44", wordWrap: { width: 320 },
       }));
     } else if (this.view.opponentRevealedHandCard) {
       const rc = this.view.opponentRevealedHandCard;
       const rcName = CLIENT_CARD_DEFS.get(rc.defId)?.name ?? rc.defId;
-      addHud(this.add.text(20, 60, `OPP REVEALS: ${rcName} (val ${CLIENT_CARD_DEFS.get(rc.defId)?.value ?? "?"}) — see panel →`, {
+      const oppRevealText = `OPP REVEALS: ${rcName} (val ${CLIENT_CARD_DEFS.get(rc.defId)?.value ?? "?"}) — see panel →`;
+      noteStatus("opponent-reveal-status", oppRevealText);
+      addHud(this.add.text(20, 60, oppRevealText, {
         fontSize: "10px", fontFamily: "monospace", color: "#ffaa44",
       }));
     }
 
-    // Contextual play hint
-    if (isCompileChoice) {
-      addHud(this.add.text(L.W / 2, 54,
-        "Select a protocol to compile ↓", {
-          fontSize: "11px", fontFamily: "monospace", color: "#ccaa00",
-        }).setOrigin(0.5));
-    } else if (myTurn) {
-      let hint: string;
-      if (this.view.pendingBonusPlay) {
-        hint = this.view.pendingBonusPlay.anyLine
-          ? "Bonus play: click a card, then any line ↓"
-          : "Bonus play: click a card, then its protocol line ↓";
-      } else if (this.selectedCard === null) {
-        hint = "Click a card in your hand to select it";
-      } else if (this.faceDownMode) {
-        hint = "Face-down: click any of your line zones below ↓";
-      } else {
-        hint = "Face-up: click a GREEN line zone that matches the card's protocol ↓";
-      }
-      addHud(this.add.text(L.lineCx[1], 54, hint, {
-        fontSize: "26px", fontFamily: "monospace", color: "#7799bb",
-      }).setOrigin(0.5));
+    const phaseHint = this.getPhaseHintText(myTurn, isCompileChoice, isEffectResolution);
+    if (phaseHint) {
+      noteStatus("phase-hint", phaseHint);
+      addHud(this.add.text(L.lineCx[1], 54, phaseHint, {
+        fontSize: "20px", fontFamily: "monospace", color: "#7799bb", align: "center",
+        wordWrap: { width: 760 },
+      }).setOrigin(0.5)
+        .setName("phase-hint")
+        .setData("testid", "phase-hint"));
     }
+
+    this.publishHudStatusTexts(hudStatusTexts);
   }
 
   private renderBoard(): void {
@@ -736,14 +906,15 @@ export class GameScene extends Phaser.Scene {
         };
       }
       return (card: CardView) => {
-        if ("hidden" in card) return;
+        // Both CardInstance and HiddenCard have instanceId — use it directly.
+        const instanceId = (card as { instanceId: string }).instanceId;
         if (effectSpec!.needsLine) {
-          this.effectBoardTargetId = (card as CardInstance).instanceId;
+          this.effectBoardTargetId = instanceId;
           this.renderAll();
         } else {
           getSocket().emit("resolve_effect", {
             id: pendingEffectId!,
-            targetInstanceId: (card as CardInstance).instanceId,
+            targetInstanceId: instanceId,
           });
         }
       };
@@ -824,7 +995,7 @@ export class GameScene extends Phaser.Scene {
       // Own protocol block (left third) — full rectangle is interactive
       const myProtoRect = this.add.rectangle(leftCx, midY, thirdW, L.stripH, myProtoColor)
         .setAlpha(0.9).setInteractive({ useHandCursor: true });
-      myProtoRect.on("pointerover", () => { myProtoRect.setAlpha(1);   this.showFocusProtocol(myProtoId, true, li); });
+      myProtoRect.on("pointerover", () => { myProtoRect.setAlpha(1);   this.showFocusProtocol(li); });
       myProtoRect.on("pointerout",  () => { myProtoRect.setAlpha(0.9); this.showFocusCard(null); });
       this.boardGroup.add(myProtoRect, true);
       this.boardGroup.add(
@@ -849,7 +1020,7 @@ export class GameScene extends Phaser.Scene {
       // Opponent protocol block (right third) — full rectangle is interactive
       const oppProtoRect = this.add.rectangle(rightCx, midY, thirdW, L.stripH, oppProtoColor)
         .setAlpha(0.9).setInteractive({ useHandCursor: true });
-      oppProtoRect.on("pointerover", () => { oppProtoRect.setAlpha(1);   this.showFocusProtocol(oppProtoId, false, li); });
+      oppProtoRect.on("pointerover", () => { oppProtoRect.setAlpha(1);   this.showFocusProtocol(li); });
       oppProtoRect.on("pointerout",  () => { oppProtoRect.setAlpha(0.9); this.showFocusCard(null); });
       this.boardGroup.add(oppProtoRect, true);
       this.boardGroup.add(
@@ -1079,7 +1250,29 @@ export class GameScene extends Phaser.Scene {
       if (isTarget) {
         sprite.makeEffectTarget((c) => onCardClick!(c));
       }
-      sprite.addFocusHover((c) => this.showFocusCard(c));
+      const canHoldReveal = isOwn && !("hidden" in card) && (card as CardInstance).face === CardFace.FaceDown;
+      const revealCard: CardView = canHoldReveal
+        ? { ...(card as CardInstance), face: CardFace.FaceUp }
+        : card;
+      let isHovered = false;
+      let isHolding = false;
+      const refreshFocus = () => {
+        if (!isHovered) {
+          this.showFocusCard(null);
+          return;
+        }
+        this.showFocusCard(canHoldReveal && isHolding ? revealCard : card);
+      };
+      sprite.addFocusHover((c) => {
+        isHovered = c !== null;
+        refreshFocus();
+      });
+      if (canHoldReveal) {
+        sprite.addPressHold((holding) => {
+          isHolding = holding;
+          refreshFocus();
+        });
+      }
       // Highlight the staged board-card selection (picked, waiting for line)
       if (!("hidden" in card) && this.effectBoardTargetId &&
           (card as CardInstance).instanceId === this.effectBoardTargetId) {
@@ -1190,7 +1383,7 @@ export class GameScene extends Phaser.Scene {
             targetInstanceId: (c as CardInstance).instanceId,
           });
         });
-      } else if (this.isMyTurn()) {
+      } else if (this.isMyTurn() || isSelected) {
         sprite.makeInteractive((c) => {
           if ("hidden" in c) return;
           if (this.selectedCard && "instanceId" in this.selectedCard && this.selectedCard.instanceId === (c as any).instanceId) {
@@ -1232,7 +1425,6 @@ export class GameScene extends Phaser.Scene {
       face,
       lineIndex,
     });
-    this.selectedCard = null;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1343,8 +1535,9 @@ export class GameScene extends Phaser.Scene {
         return { boardMode: "any_card", handPick: false, needsLine: false, lineScope: null, isOptional: false, isAutoExecute: false };
       case "reveal_own_hand":
       case "exchange_hand":
-      case "give_to_draw":
         return { boardMode: null, handPick: true, needsLine: false, lineScope: null, isOptional: false, isAutoExecute: false };
+      case "give_to_draw":
+        return { boardMode: null, handPick: true, needsLine: false, lineScope: null, isOptional: true, isAutoExecute: false };
       default:
         return auto;
     }
@@ -1428,6 +1621,57 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private getPhaseHintText(myTurn: boolean, isCompileChoice: boolean, isEffectResolution: boolean): string | null {
+    if (isEffectResolution) {
+      return null;
+    }
+
+    if (isCompileChoice) {
+      return "Select a protocol to compile ↓";
+    }
+
+    switch (this.turnPhase) {
+      case TurnPhase.Start:
+        return myTurn
+          ? "Nothing to do in START - moving to CONTROL shortly."
+          : "Opponent START phase - no actions available.";
+      case TurnPhase.CheckControl:
+        return myTurn
+          ? "Nothing to do in CONTROL - checking control automatically."
+          : "Opponent CONTROL phase - checking control automatically.";
+      case TurnPhase.CheckCompile:
+        return myTurn
+          ? "Nothing to do in COMPILE - checking compile options automatically."
+          : "Opponent COMPILE phase - checking compile options automatically.";
+      case TurnPhase.ClearCache:
+        return this.view.hand.length > 5
+          ? "CACHE phase - discarding down to five cards automatically."
+          : "Nothing to do in CACHE - hand is already five cards or less.";
+      case TurnPhase.End:
+        return myTurn
+          ? "Nothing to do in END - resolving end-of-turn effects."
+          : "Opponent END phase - resolving end-of-turn effects.";
+      case TurnPhase.Action:
+        if (!myTurn) {
+          return "Waiting for your opponent to act.";
+        }
+        if (this.view.pendingBonusPlay) {
+          return this.view.pendingBonusPlay.anyLine
+            ? "Bonus play: click a card, then any line ↓"
+            : "Bonus play: click a card, then its protocol line ↓";
+        }
+        if (this.selectedCard === null) {
+          return "Click a card in your hand to select it, or reset the hand.";
+        }
+        if (this.faceDownMode) {
+          return "Face-down: click any of your line zones below ↓";
+        }
+        return "Face-up: click a GREEN line zone that matches the card's protocol ↓";
+      default:
+        return null;
+    }
+  }
+
   private animatePhaseTransition(): void {
     // Render to show the new phase state
     this.renderAll();
@@ -1439,34 +1683,65 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private pulsePhaseChip(state: "START" | "CONTROL" | "COMPILE" | "ACTION" | "CACHE" | "END"): void {
-    // Find the phase chip for this state in the HUD group
-    const turnStates = ["START", "CONTROL", "COMPILE", "ACTION", "CACHE", "END"] as const;
-    const stateIndex = turnStates.indexOf(state);
-    
-    if (stateIndex === -1) return;
-
-    // Find the chip rectangle (every state has 2 objects: rectangle + text, in pairs)
-    const chipIndex = stateIndex * 2; // rect and text pairs
-    const chip = this.hudGroup.getChildren()[chipIndex] as Phaser.GameObjects.Rectangle;
-    
-    if (!chip || !chip.setFillStyle) return;
-
-    // Phase chip colors
-    const activeFill = 0x19314a;   // Normal active fill
-    const brightFill = 0x3a75cf;   // Bright flash for pulse
-
-    // Pulse animation: bright flash then back to normal
-    this.tweens.add({
-      targets: chip,
-      fillColor: brightFill,
-      duration: 150,
-      ease: Phaser.Math.Easing.Quadratic.Out,
-      yoyo: true,
-      hold: 350,
-    });
+  private clearPhaseIntroTimers(): void {
+    for (const timer of this.phaseIntroTimers) timer.remove(false);
+    this.phaseIntroTimers = [];
   }
 
+  private maybePlayInitialPhaseIntro(): void {
+    // Server already owns turn-phase sequencing. Avoid client-side replay on first load.
+    this.animatePhaseTransition();
+  }
+
+  private pulsePhaseChip(state: "START" | "CONTROL" | "COMPILE" | "ACTION" | "CACHE" | "END"): void {
+    const turnStates = ["START", "CONTROL", "COMPILE", "ACTION", "CACHE", "END"] as const;
+    const stateIndex = turnStates.indexOf(state);
+    if (stateIndex === -1) return;
+
+    const chipIndex = stateIndex * 2;
+    const chip = this.hudGroup.getChildren()[chipIndex] as Phaser.GameObjects.Rectangle;
+    if (!chip || !chip.setFillStyle) return;
+
+    // Clean up any previous glow from a rapid phase transition
+    if (this.phaseGlow) {
+      this.tweens.killTweensOf(this.phaseGlow);
+      this.phaseGlow.destroy();
+      this.phaseGlow = null;
+    }
+    this.tweens.killTweensOf(chip);
+    chip.setScale(1);
+
+    // Glow ring: bright colour, transparent → visible → fades out smoothly
+    const glow = this.add.rectangle(chip.x, chip.y, chip.width + 8, chip.height + 8, 0x4a9eff, 0)
+      .setDepth(98);
+    this.phaseGlow = glow;
+
+    this.tweens.add({
+      targets: glow,
+      alpha: 0.65,
+      duration: 200,
+      ease: 'Sine.Out',
+      yoyo: true,
+      hold: 120,
+      repeat: 1,
+      onComplete: () => {
+        if (this.phaseGlow === glow) this.phaseGlow = null;
+        glow.destroy();
+      },
+    });
+
+    // Chip breathe: scale gently expands then returns
+    this.tweens.add({
+      targets: chip,
+      scaleX: 1.06,
+      scaleY: 1.18,
+      duration: 220,
+      ease: 'Sine.Out',
+      yoyo: true,
+      hold: 80,
+      onComplete: () => chip.setScale(1),
+    });
+  }
   // ── Focus card panel ──────────────────────────────────────────────────────
 
   private showFocusTurnState(state: "START" | "CONTROL" | "COMPILE" | "ACTION" | "CACHE" | "END"): void {
@@ -1479,6 +1754,7 @@ export class GameScene extends Phaser.Scene {
       this.focusPanelGroup.add(go, true);
       return go;
     };
+
 
     add(this.add.rectangle(cx, H / 2, pw, H, 0x070b11).setStrokeStyle(1, 0x18283a));
     add(this.add.text(cx, 30, "PHASE", {
@@ -1512,7 +1788,7 @@ export class GameScene extends Phaser.Scene {
    * Pass null to show the empty placeholder. Called on every hover enter/leave
    * and at the start of each renderAll() to reset stale state.
    */
-  private showFocusProtocol(protoId: string, isOwn: boolean, lineIndex: number): void {
+  private showFocusProtocol(lineIndex: number): void {
     this.focusPanelGroup.clear(true, true);
     const L = this.computeLayout();
     const { focusPanelCx: cx, focusPanelW: pw, H } = L;
@@ -1525,77 +1801,92 @@ export class GameScene extends Phaser.Scene {
 
     // Panel background
     add(this.add.rectangle(cx, H / 2, pw, H, 0x070b11).setStrokeStyle(1, 0x18283a));
-    add(this.add.text(cx, 10, "PROTOCOL", {
-      fontSize: "9px", fontFamily: "monospace", color: "#1a3355",
+    add(this.add.text(cx, 10, `LINE ${lineIndex}`, {
+      fontSize: "9px", fontFamily: "monospace", color: "#2a4d72", fontStyle: "bold",
     }).setOrigin(0.5, 0));
 
-    // ── Landscape card centred in panel ────────────────────────────────────
-    // Drawn wide & short to look like a card lying on its side
-    const cardW = pw - 20;   // ~220px
-    const cardH = 130;
-    const cardCy = H / 2 - 40;
-    const cardCx = cx;
+    const ownVal    = this.view.lineValues[lineIndex];
+    const oppVal    = this.view.opponentLineValues[lineIndex];
+    const myProtoId  = this.view.protocols[lineIndex]?.protocolId          ?? "";
+    const oppProtoId = this.view.opponentProtocols[lineIndex]?.protocolId  ?? "";
+    const myCom     = this.view.protocols[lineIndex]?.status  === ProtocolStatus.Compiled;
+    const oppCom    = this.view.opponentProtocols[lineIndex]?.status === ProtocolStatus.Compiled;
+    const myLoad    = this.view.protocols[lineIndex]?.status  === ProtocolStatus.Loading;
+    const oppLoad   = this.view.opponentProtocols[lineIndex]?.status === ProtocolStatus.Loading;
 
-    const protoColor  = PROTOCOL_COLORS.get(protoId) ?? 0x1a3a5c;
-    const protoComp = this.complementaryProtoColor(protoId);
-    const protoName   = PROTOCOL_NAMES_CLIENT.get(protoId) ?? protoId;
-    const compiled    = isOwn
-      ? this.view.protocols[lineIndex]?.status === ProtocolStatus.Compiled
-      : this.view.opponentProtocols[lineIndex]?.status === ProtocolStatus.Compiled;
-    const ownVal   = this.view.lineValues[lineIndex];
-    const oppVal   = this.view.opponentLineValues[lineIndex];
-    const myVal    = isOwn ? ownVal : oppVal;
-    const theirVal = isOwn ? oppVal : ownVal;
+    // ── Layout constants ───────────────────────────────────────────────────
+    const panelLeft  = cx - pw / 2;
+    const panelRight = cx + pw / 2;
+    const cardTop    = 26;
+    const cardBottom = H - 8;
+    const cardH      = cardBottom - cardTop;
+    const cardCy     = cardTop + cardH / 2;
+    const cardW      = Math.floor((pw - 8) * 0.33);   // ~77px each, 8px total gaps
+    const midW       = pw - 8 - cardW * 2;            // remainder for score column
 
-    // Card outline
-    add(this.add.rectangle(cardCx, cardCy, cardW, cardH, 0x0e1c2e)
-      .setStrokeStyle(2, compiled ? 0x00ffcc : 0x2d7acc));
+    const leftCardCx  = panelLeft  + 4 + cardW / 2;
+    const rightCardCx = panelRight - 4 - cardW / 2;
+    const midCx       = cx;
 
-    // Coloured header strip — left 30% of width (the "top row" lying on its side)
-    const headerW = Math.round(cardW * 0.30);
-    const headerCx = cardCx - cardW / 2 + headerW / 2;
-    add(this.add.rectangle(headerCx, cardCy, headerW, cardH, protoColor));
+    // ── Draw one protocol card (full-height solid colour) ──────────────────
+    const drawProtoCard = (
+      cardCx: number,
+      protoId: string,
+      compiled: boolean,
+      loading: boolean,
+    ) => {
+      const protoColor = PROTOCOL_COLORS.get(protoId) ?? 0x1a3a5c;
+      const protoComp  = this.complementaryProtoColor(protoId);
+      const protoName  = PROTOCOL_NAMES_CLIENT.get(protoId) ?? protoId;
 
-    // Protocol name — vertical in the header (rotated 90° text via angle)
-    const nameText = this.add.text(headerCx, cardCy, protoName, {
-      fontSize: "15px", fontFamily: "monospace", color: protoComp, fontStyle: "bold",
-    }).setOrigin(0.5, 0.5).setAngle(-90);
-    add(nameText);
+      const borderColor = compiled ? 0x00ffcc : loading ? 0x1e2e40 : 0x2d5a8a;
 
-    // Status label
-    const statusLabel = compiled ? "COMPILED" : "Loading...";
-    const statusColor = compiled ? "#00ffcc" : "#5588aa";
-    add(this.add.text(headerCx, cardCy + cardH / 2 - 10, statusLabel, {
-      fontSize: "8px", fontFamily: "monospace", color: statusColor, fontStyle: "bold",
-    }).setOrigin(0.5, 1));
+      // Solid proto-color fill card
+      add(this.add.rectangle(cardCx, cardCy, cardW, cardH, loading ? 0x0e1620 : protoColor)
+        .setStrokeStyle(2, borderColor)
+        .setAlpha(loading ? 0.6 : 1));
 
-    // Body — right portion
-    const bodyX = cardCx - cardW / 2 + headerW + 10;
-    const bodyRight = cardCx + cardW / 2 - 10;
-    const bodyCx = (bodyX + bodyRight) / 2;
+      // Protocol name — centred vertically, word-wrapped to fit narrow card
+      add(this.add.text(cardCx, cardCy - 12, protoName, {
+        fontSize: "12px", fontFamily: "monospace", fontStyle: "bold",
+        color: loading ? "#2a3f55" : protoComp,
+        wordWrap: { width: cardW - 6 }, align: "center",
+      }).setOrigin(0.5, 0.5));
 
-    // Your line value
-    add(this.add.text(bodyX, cardCy - cardH / 2 + 14, isOwn ? "YOUR LINE" : "OPP LINE", {
-      fontSize: "9px", fontFamily: "monospace", color: "#5588aa",
-    }).setOrigin(0, 0));
-    add(this.add.text(bodyX, cardCy - cardH / 2 + 26, String(myVal), {
-      fontSize: "34px", fontFamily: "monospace", color: "#c8eeff", fontStyle: "bold",
-    }).setOrigin(0, 0));
+      // Status badge at the bottom
+      const statusLabel = compiled ? "✓ COMPILED" : loading ? "LOADING" : "active";
+      const statusColor = compiled ? "#00ffcc" : loading ? "#2a4060" : "#4d88aa";
+      add(this.add.text(cardCx, cardBottom - 4, statusLabel, {
+        fontSize: "7px", fontFamily: "monospace", fontStyle: "bold", color: statusColor,
+      }).setOrigin(0.5, 1));
+    };
 
-    // Divider
-    add(this.add.rectangle(bodyCx, cardCy + 2, bodyRight - bodyX, 1, 0x1e4a70));
+    drawProtoCard(leftCardCx,  myProtoId,  myCom,  myLoad);
+    drawProtoCard(rightCardCx, oppProtoId, oppCom, oppLoad);
 
-    // Opponent line value
-    add(this.add.text(bodyX, cardCy + 8, isOwn ? "OPP LINE" : "YOUR LINE", {
-      fontSize: "9px", fontFamily: "monospace", color: "#5588aa",
-    }).setOrigin(0, 0));
-    add(this.add.text(bodyX, cardCy + 20, String(theirVal), {
-      fontSize: "34px", fontFamily: "monospace", color: "#ffbb88", fontStyle: "bold",
-    }).setOrigin(0, 0));
+    // ── Centre score column ────────────────────────────────────────────────
+    const indicator = ownVal > oppVal ? "▲" : ownVal < oppVal ? "▼" : "=";
+    const indColor  = ownVal > oppVal ? "#44ff99" : ownVal < oppVal ? "#ff6655" : "#99aacc";
 
-    // ── Line index indicator below card ────────────────────────────────────
-    add(this.add.text(cx, cardCy + cardH / 2 + 14, `Line ${lineIndex}`, {
-      fontSize: "11px", fontFamily: "monospace", color: "#334455",
+    // Opponent score – top half
+    add(this.add.text(midCx, cardTop + 8, "OPP", {
+      fontSize: "8px", fontFamily: "monospace", color: "#886644",
+    }).setOrigin(0.5, 0));
+    add(this.add.text(midCx, cardTop + 20, String(oppVal), {
+      fontSize: "32px", fontFamily: "monospace", fontStyle: "bold", color: "#ffbb88",
+    }).setOrigin(0.5, 0));
+
+    // VS indicator in the middle
+    add(this.add.text(midCx, cardCy + 2, indicator, {
+      fontSize: "16px", fontFamily: "monospace", fontStyle: "bold", color: indColor,
+    }).setOrigin(0.5, 0.5));
+
+    // Player score – bottom half
+    add(this.add.text(midCx, cardCy + 14, "YOU", {
+      fontSize: "8px", fontFamily: "monospace", color: "#446688",
+    }).setOrigin(0.5, 0));
+    add(this.add.text(midCx, cardCy + 26, String(ownVal), {
+      fontSize: "32px", fontFamily: "monospace", fontStyle: "bold", color: "#c8eeff",
     }).setOrigin(0.5, 0));
   }
 
@@ -1751,19 +2042,18 @@ export class GameScene extends Phaser.Scene {
       const out = (outR << 16) | (outG << 8) | outB;
       return `#${out.toString(16).padStart(6, "0")}`;
     };
-    const isHidden   = "hidden" in card;
+    const isHidden = "hidden" in card;
     const isFaceDown = isHidden || (!isHidden && (card as any).face === CardFace.FaceDown);
-    const defId      = !isHidden ? (card as any).defId as string : undefined;
-    const def        = defId ? CLIENT_CARD_DEFS.get(defId) : undefined;
+    const defId = !isHidden ? (card as any).defId as string : undefined;
+    const def = defId ? CLIENT_CARD_DEFS.get(defId) : undefined;
     const protoColor = defId ? (PROTOCOL_COLORS.get(`proto_${defId.split("_")[0]}`) ?? 0x1a3a5c) : 0x1a3a5c;
     const faceUpBgFill = shade(protoColor, 0.7);
     const titleComp = oppositeHueCss(protoColor);
-    const bgComp  = oppositeHueCss(faceUpBgFill);
+    const bgComp = oppositeHueCss(faceUpBgFill);
 
-    const hH = h / 2;  // 140
-    const hW = w / 2;  // 100
+    const hH = h / 2;
+    const hW = w / 2;
 
-    // Rounded white outer border
     const borderPad = 4;
     const borderRadius = 10;
     const borderGfx = this.add.graphics();
@@ -1771,24 +2061,20 @@ export class GameScene extends Phaser.Scene {
     borderGfx.strokeRoundedRect(cx - hW - borderPad, cy - hH - borderPad, w + borderPad * 2, h + borderPad * 2, borderRadius);
     add(borderGfx);
 
-    // Card outline
-    const bgFill   = isFaceDown ? 0x242424 : faceUpBgFill;
+    const bgFill = isFaceDown ? 0x242424 : faceUpBgFill;
     const bgStroke = isFaceDown ? 0x666666 : protoColor;
     add(this.add.rectangle(cx, cy, w, h, bgFill).setStrokeStyle(2, bgStroke));
 
     if (isFaceDown) {
-      // Subtle vertical stripe texture
       for (let dx = -80; dx <= 80; dx += 25) {
         add(this.add.rectangle(cx + dx, cy, 6, h - 8, 0x3a3a3a).setAlpha(0.55));
       }
-      // Value chip — top-right
       const chip = this.add.container(cx + hW - 22, cy - hH + 22);
       chip.add(this.add.circle(0, 0, 18, 0x3a3a3a));
       chip.add(this.add.text(0, 0, "2", {
         fontSize: "22px", fontFamily: "monospace", color: "#888888", fontStyle: "bold",
       }).setOrigin(0.5));
       add(chip);
-      // Label
       add(this.add.text(cx, cy + hH - 16, "FACE DOWN", {
         fontSize: "12px", fontFamily: "monospace", color: "#666666",
       }).setOrigin(0.5, 1));
@@ -1797,8 +2083,7 @@ export class GameScene extends Phaser.Scene {
 
     if (!def) return;
 
-    // ── Name bar — top 38px ──────────────────────────────────────────────────
-    const nameBarH  = 38;
+    const nameBarH = 38;
     const nameBarCy = cy - hH + nameBarH / 2;
     add(this.add.rectangle(cx, nameBarCy, w, nameBarH, protoColor));
     add(this.add.text(cx, nameBarCy, def.name, {
@@ -1806,7 +2091,6 @@ export class GameScene extends Phaser.Scene {
       wordWrap: { width: w - 52 },
     }).setOrigin(0.5));
 
-    // Value chip — top-right of name bar
     const chip = this.add.container(cx + hW - 22, cy - hH + 20);
     chip.add(this.add.circle(0, 0, 18, shade(faceUpBgFill, 0.6)));
     chip.add(this.add.text(0, 0, String(def.value), {
@@ -1814,34 +2098,30 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5));
     add(chip);
 
-    // ── Three equal sections for START / PLAY / END ──────────────────────────
-    const secH = (h - nameBarH) / 3;                           // ≈ 80.7px each
+    const secH = (h - nameBarH) / 3;
     const secTop = (i: number) => cy - hH + nameBarH + secH * i;
 
-    // Divider lines at section boundaries
     for (let i = 0; i < 3; i++) {
       add(this.add.rectangle(cx, secTop(i), w, 1, 0x1e4a70));
     }
 
     const sections = [
       { tag: "START", text: def.top },
-      { tag: "PLAY",  text: def.mid },
-      { tag: "END",   text: def.bot },
+      { tag: "PLAY", text: def.mid },
+      { tag: "END", text: def.bot },
     ] as const;
 
     sections.forEach(({ tag, text }, i) => {
       const sTop = secTop(i);
       if (!text) {
-        add(this.add.text(cx, sTop + secH / 2, "—", {
+        add(this.add.text(cx, sTop + secH / 2, "-", {
           fontSize: "12px", fontFamily: "monospace", color: bgComp,
         }).setOrigin(0.5));
         return;
       }
-      // Trigger label — top-left of section
       add(this.add.text(cx - hW + 7, sTop + 6, tag, {
         fontSize: "11px", fontFamily: "monospace", color: bgComp,
       }).setOrigin(0, 0));
-      // Effect text — centred, wrapping
       add(this.add.text(cx, sTop + 22, text, {
         fontSize: "14px", fontFamily: "monospace", color: bgComp,
         wordWrap: { width: w - 18 }, align: "center",
@@ -1858,7 +2138,9 @@ export class GameScene extends Phaser.Scene {
     const makeBtn = (cx: number, y: number, label: string, lineIdx: number, borderColor: number, textColor: string) => {
       const btn = this.add.rectangle(cx, y, 140, 26, 0x001a0a)
         .setStrokeStyle(2, borderColor)
-        .setInteractive({ useHandCursor: true });
+        .setInteractive({ useHandCursor: true })
+        .setName(`line-pick-button-${lineIdx}`)
+        .setData("testid", `line-pick-button-${lineIdx}`);
       btn.on("pointerover",  () => btn.setFillStyle(0x003320));
       btn.on("pointerout",   () => btn.setFillStyle(0x001a0a));
       btn.on("pointerdown",  () => onPick(lineIdx));

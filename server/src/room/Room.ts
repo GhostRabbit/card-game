@@ -4,10 +4,14 @@ import {
   ClientToServerEvents,
   ServerToClientEvents,
   ProtocolStatus,
-  GameMode,
+  LobbySettings,
+  DraftVariant,
 } from "@compile/shared";
 import {
   createInitialDraftState,
+  createRandomThreeDraftState,
+  DEFAULT_LOBBY_SETTINGS,
+  normalizeLobbySettings,
   applyDraftPick,
   buildDeck,
 } from "../game/DraftEngine";
@@ -40,6 +44,8 @@ interface PlayerSlot {
   index: 0 | 1;
 }
 
+const PHASE_HIGHLIGHT_MS = 500;
+
 export type RoomPhaseType = "waiting" | "draft" | "game" | "over";
 
 export class Room {
@@ -49,7 +55,9 @@ export class Room {
   private draftState: DraftState | null = null;
   private gameState: ServerGameState | null = null;
   private logger: GameLogger | null = null;
-  private gameMode: GameMode = GameMode.AllProtocols;
+  private lobbySettings: LobbySettings = DEFAULT_LOBBY_SETTINGS;
+  private phaseSequenceTimers: Array<ReturnType<typeof setTimeout>> = [];
+  private phaseSequenceRunning = false;
 
   constructor(code: string) {
     this.code = code;
@@ -72,6 +80,7 @@ export class Room {
   }
 
   removePlayer(socketId: string): void {
+    this.clearPhaseSequence();
     for (let i = 0; i < 2; i++) {
       if (this.players[i]?.socket.id === socketId) {
         this.players[i] = null;
@@ -83,10 +92,27 @@ export class Room {
     }
   }
 
-  startDraft(gameMode: GameMode = GameMode.AllProtocols): void {
+  setLobbySettings(settings?: LobbySettings): void {
+    this.lobbySettings = normalizeLobbySettings(settings);
+  }
+
+  startDraft(settings?: LobbySettings): void {
     this.phase = "draft";
-    this.gameMode = gameMode;
-    this.draftState = createInitialDraftState(gameMode);
+    this.lobbySettings = normalizeLobbySettings(settings ?? this.lobbySettings);
+
+    if (this.lobbySettings.draftVariant === DraftVariant.Random3) {
+      const randomDraft = createRandomThreeDraftState(this.lobbySettings);
+      if ("error" in randomDraft) {
+        for (let i = 0; i < 2; i++) {
+          this.players[i]?.socket.emit("room_error", { message: randomDraft.error });
+        }
+        return;
+      }
+      this.startGame(randomDraft);
+      return;
+    }
+
+    this.draftState = createInitialDraftState(this.lobbySettings);
     for (let i = 0; i < 2; i++) {
       this.players[i]?.socket.emit("game_starting", { draftState: this.draftState });
     }
@@ -121,7 +147,8 @@ export class Room {
     this.logger.log("PLAYERS", `P0=${p0}, P1=${p1}`);
     const picks0 = draftState.picks.filter(p => p.playerIndex === 0).map(p => p.protocolId).join(", ");
     const picks1 = draftState.picks.filter(p => p.playerIndex === 1).map(p => p.protocolId).join(", ");
-    this.logger.log("GAME_MODE", this.gameMode);
+    const setSummary = draftState.lobbySettings.selectedProtocolSets.join(", ");
+    this.logger.log("GAME_MODE", `${draftState.lobbySettings.draftVariant} | sets: [${setSummary}]`);
     this.logger.log("DRAFT_RESULT", `P0: [${picks0}] | P1: [${picks1}]`);
 
     // Build decks first, then construct player states drawing from those decks
@@ -156,7 +183,7 @@ export class Room {
     this.gameState = createServerGameState(playerStates, decks);
     processAutoPhases(this.gameState);
     this.logger?.log("TURN", `Turn 1 — active: P0 (${this.players[0]?.username})`);
-    this.broadcastState();
+    this.broadcastStartTurnPhases(this.gameState);
   }
 
   /** Flush any pending effect/draw logs from the game state to the logger. */
@@ -172,6 +199,10 @@ export class Room {
     if (!this.gameState) return;
     const slot = this.players.find((p) => p?.socket.id === socket.id);
     if (!slot) return;
+    if (this.phaseSequenceRunning) {
+      socket.emit("action_rejected", { reason: "Phase transition in progress." });
+      return;
+    }
 
     const result = playCard(this.gameState, slot.index, instanceId, face, lineIndex);
     if (!result.success) {
@@ -199,6 +230,10 @@ export class Room {
     if (!this.gameState) return;
     const slot = this.players.find((p) => p?.socket.id === socket.id);
     if (!slot) return;
+    if (this.phaseSequenceRunning) {
+      socket.emit("action_rejected", { reason: "Phase transition in progress." });
+      return;
+    }
 
     const result = chooseCompile(this.gameState, slot.index, lineIndex);
     if (!result.success) {
@@ -222,6 +257,10 @@ export class Room {
     if (!this.gameState) return;
     const slot = this.players.find((p) => p?.socket.id === socket.id);
     if (!slot) return;
+    if (this.phaseSequenceRunning) {
+      socket.emit("action_rejected", { reason: "Phase transition in progress." });
+      return;
+    }
 
     const handBefore = this.gameState.players[slot.index].hand.length;
     const result = refresh(this.gameState, slot.index);
@@ -281,11 +320,17 @@ export class Room {
     }
 
     // Validate targetInstanceId for discard: must be in the player's hand
-    if (next.type === "discard" && targetInstanceId) {
-      const inHand = state.players[slot.index].hand.some((c) => c.instanceId === targetInstanceId);
-      if (!inHand) {
-        socket.emit("action_rejected", { reason: "That card is not in your hand." });
+    if (next.type === "discard") {
+      if (!targetInstanceId && state.players[slot.index].hand.length > 0) {
+        socket.emit("action_rejected", { reason: "Choose a card to discard." });
         return;
+      }
+      if (targetInstanceId) {
+        const inHand = state.players[slot.index].hand.some((c) => c.instanceId === targetInstanceId);
+        if (!inHand) {
+          socket.emit("action_rejected", { reason: "That card is not in your hand." });
+          return;
+        }
       }
     }
 
@@ -311,6 +356,9 @@ export class Room {
       }
       // Schedule phase-by-phase broadcast for CACHE, END, START
       this.broadcastEndTurnPhases(state);
+    } else if (ctx === "cache") {
+      // Cache discards finished; continue with cache passives and END/START sequence.
+      this.broadcastEndTurnPhases(state);
     } else if (ctx === "end") {
       // Already resolved END effects
       finishTurn(state);
@@ -325,11 +373,20 @@ export class Room {
       this.broadcastState();
     } else if (ctx === "start") {
       processAutoPhases(state);
+      if (state.turnPhase !== TurnPhase.EffectResolution) {
+        this.checkWin();
+        const nextPlayer = state.activePlayerIndex;
+        this.logger?.log("TURN", `Turn ${state.turnNumber} — active: P${nextPlayer} (${this.players[nextPlayer]?.username})`);
+        this.broadcastStartTurnPhases(state);
+        return;
+      }
       this.broadcastState();
     }
   }
 
   private broadcastEndTurnPhases(state: ServerGameState): void {
+    this.clearPhaseSequence();
+
     // Step 1: Show CACHE phase
     state.turnPhase = TurnPhase.ClearCache;
     const pi = state.activePlayerIndex;
@@ -340,7 +397,24 @@ export class Room {
       state.pendingLogs.push("  skip_check_cache: clear-cache discard skipped");
     } else {
       const over5 = state.players[pi].hand.length - 5;
-      if (over5 > 0) discardFromHand(state, pi, over5);
+      if (over5 > 0) {
+        for (let i = 0; i < over5; i++) {
+          state.effectQueue.push({
+            id: `${Date.now()}-cache-${i}`,
+            cardDefId: "cache_discard",
+            cardName: "Cache",
+            type: "discard",
+            description: "Choose a card to discard for Cache.",
+            ownerIndex: pi,
+            trigger: "immediate",
+            payload: { reason: "cache" },
+          });
+        }
+        state.effectQueueContext = "cache";
+        state.turnPhase = TurnPhase.EffectResolution;
+        this.broadcastState();
+        return;
+      }
     }
     
     // Trigger after_clear_cache_draw passives
@@ -363,7 +437,7 @@ export class Room {
     this.broadcastState();
     
     // Step 2: After 500ms, show END phase
-    setTimeout(() => {
+    const endTimer = setTimeout(() => {
       state.turnPhase = TurnPhase.End;
       
       // Enqueue END effects
@@ -388,7 +462,7 @@ export class Room {
       this.broadcastState();
       
       // Step 3: After another 500ms, show opponent's START phase
-      setTimeout(() => {
+      const startTimer = setTimeout(() => {
         finishTurn(state);
         this.flushEffectLogs();
         
@@ -398,10 +472,57 @@ export class Room {
             const nextPlayer = this.gameState.activePlayerIndex;
             this.logger?.log("TURN", `Turn ${this.gameState.turnNumber} — active: P${nextPlayer} (${this.players[nextPlayer]?.username})`);
           }
+          this.broadcastStartTurnPhases(state);
+          return;
         }
         this.broadcastState();
-      }, 500);
-    }, 500);
+      }, PHASE_HIGHLIGHT_MS);
+      this.phaseSequenceTimers.push(startTimer);
+    }, PHASE_HIGHLIGHT_MS);
+    this.phaseSequenceTimers.push(endTimer);
+  }
+
+  private clearPhaseSequence(): void {
+    for (const timer of this.phaseSequenceTimers) clearTimeout(timer);
+    this.phaseSequenceTimers = [];
+    this.phaseSequenceRunning = false;
+  }
+
+  private broadcastStartTurnPhases(state: ServerGameState): void {
+    this.clearPhaseSequence();
+
+    if (state.turnPhase === TurnPhase.EffectResolution) {
+      this.broadcastState();
+      return;
+    }
+
+    const finalPhase = state.turnPhase;
+    const phases: TurnPhase[] = [
+      TurnPhase.Start,
+      TurnPhase.CheckControl,
+      TurnPhase.CheckCompile,
+      finalPhase,
+    ];
+
+    this.phaseSequenceRunning = true;
+
+    phases.forEach((phase, index) => {
+      const emitPhase = () => {
+        state.turnPhase = phase;
+        this.broadcastState();
+        if (index === phases.length - 1) {
+          this.phaseSequenceRunning = false;
+        }
+      };
+
+      if (index === 0) {
+        emitPhase();
+        return;
+      }
+
+      const timer = setTimeout(emitPhase, PHASE_HIGHLIGHT_MS * index);
+      this.phaseSequenceTimers.push(timer);
+    });
   }
 
   private checkWin(): void {

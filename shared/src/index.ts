@@ -28,11 +28,22 @@ export enum RoomPhase {
   Over = "over",
 }
 
-export enum GameMode {
-  AllProtocols = "AllProtocols",
-  MainUnit1    = "MainUnit1",
-  MainUnit2    = "MainUnit2",
-  Random9      = "Random9",
+export enum ProtocolSet {
+  MainUnit1 = "MainUnit1",
+  MainUnit2 = "MainUnit2",
+  Aux1 = "Aux1",
+  Aux2 = "Aux2",
+}
+
+export enum DraftVariant {
+  Full = "Full",
+  Limited9 = "Limited9",
+  Random3 = "Random3",
+}
+
+export interface LobbySettings {
+  selectedProtocolSets: ProtocolSet[];
+  draftVariant: DraftVariant;
 }
 
 // ─── Card & Protocol Data ─────────────────────────────────────────────────────
@@ -165,7 +176,7 @@ export interface DraftState {
   currentPickerIndex: 0 | 1;
   pickOrder: Array<0 | 1>;
   done: boolean;
-  gameMode: GameMode;
+  lobbySettings: LobbySettings;
 }
 
 // ─── Socket Events ────────────────────────────────────────────────────────────
@@ -184,7 +195,7 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-  create_room: (payload: { username: string; gameMode?: GameMode }) => void;
+  create_room: (payload: { username: string; lobbySettings?: LobbySettings }) => void;
   join_room: (payload: { username: string; roomCode: string }) => void;
   draft_pick: (payload: { protocolId: string }) => void;
   play_card: (payload: {

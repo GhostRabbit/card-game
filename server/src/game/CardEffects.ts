@@ -355,29 +355,58 @@ export function executeEffect(
       trash.push(discarded);
       state.players[ownerIndex].trashSize = trash.length;
       log(`discard ${discarded.defId}`);
+
+      const oppDiscardDrawFor = payload.oppDiscardDrawFor as (0 | 1 | undefined);
+      if (oppDiscardDrawFor === 0 || oppDiscardDrawFor === 1) {
+        for (const { card, amount: drawAmt } of scanPassives(state, oppDiscardDrawFor, "after_opp_discard_draw")) {
+          log(`after_opp_discard_draw (${card.defId}): drawing ${drawAmt}`);
+          drawCards(state, oppDiscardDrawFor, drawAmt);
+        }
+      }
+      const revealTo = payload.revealOpponentHandFor as (0 | 1 | undefined);
+      if (revealTo === 0 || revealTo === 1) {
+        state.revealOpponentHandFor = revealTo;
+        log(`opponent_discard_reveal: opponent hand revealed to player ${revealTo}`);
+      }
       break;
     }
 
     case "opponent_discard": {
       const amount = (payload.amount as number) ?? 1;
-      log(`opponent_discard ${amount}`);
-      discardFromHand(state, oi, amount);
-      for (const { card, amount: drawAmt } of scanPassives(state, ownerIndex, "after_opp_discard_draw")) {
-        log(`after_opp_discard_draw (${card.defId}): drawing ${drawAmt}`);
-        drawCards(state, ownerIndex, drawAmt);
+      log(`opponent_discard ${amount} (opponent chooses)`);
+      const toQueue = Math.min(amount, state.players[oi].hand.length);
+      for (let i = 0; i < toQueue; i++) {
+        state.effectQueue.push({
+          id: uuidv4(),
+          cardDefId,
+          cardName: effect.cardName,
+          type: "discard",
+          description: `Choose ${toQueue > 1 ? "a card" : "a card"} to discard.`,
+          ownerIndex: oi,
+          trigger: effect.trigger,
+          payload: { oppDiscardDrawFor: ownerIndex },
+          sourceInstanceId,
+        });
       }
       break;
     }
 
     case "opponent_discard_reveal": {
       const amount = (payload.amount as number) ?? 1;
-      log(`opponent_discard_reveal ${amount}`);
-      discardFromHand(state, oi, amount);
-      state.revealOpponentHandFor = ownerIndex;
-      log(`opponent_discard_reveal: opponent hand revealed to player ${ownerIndex}`);
-      for (const { card, amount: drawAmt } of scanPassives(state, ownerIndex, "after_opp_discard_draw")) {
-        log(`after_opp_discard_draw (${card.defId}): drawing ${drawAmt}`);
-        drawCards(state, ownerIndex, drawAmt);
+      log(`opponent_discard_reveal ${amount} (opponent chooses)`);
+      const toQueue = Math.min(amount, state.players[oi].hand.length);
+      for (let i = 0; i < toQueue; i++) {
+        state.effectQueue.push({
+          id: uuidv4(),
+          cardDefId,
+          cardName: effect.cardName,
+          type: "discard",
+          description: "Choose a card to discard.",
+          ownerIndex: oi,
+          trigger: effect.trigger,
+          payload: { oppDiscardDrawFor: ownerIndex, revealOpponentHandFor: ownerIndex },
+          sourceInstanceId,
+        });
       }
       break;
     }

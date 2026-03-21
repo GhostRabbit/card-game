@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { getSocket } from "../network/SocketClient";
-import { GameMode } from "@compile/shared";
+import { DraftVariant, LobbySettings, ProtocolSet } from "@compile/shared";
 import { createMockView } from "../data/mockGameState";
 
 export class MenuScene extends Phaser.Scene {
@@ -13,7 +13,23 @@ export class MenuScene extends Phaser.Scene {
     const socket = getSocket();
     let myPlayerIndex: 0 | 1 = 0;
     let generatedRoomCode = "";
-    let selectedMode: GameMode = GameMode.AllProtocols;
+    const selectedSets = new Set<ProtocolSet>([
+      ProtocolSet.MainUnit1,
+      ProtocolSet.MainUnit2,
+      ProtocolSet.Aux1,
+      ProtocolSet.Aux2,
+    ]);
+    let selectedVariant: DraftVariant = DraftVariant.Limited9;
+
+    const currentLobbySettings = (): LobbySettings => ({
+      selectedProtocolSets: [
+        ProtocolSet.MainUnit1,
+        ProtocolSet.MainUnit2,
+        ProtocolSet.Aux1,
+        ProtocolSet.Aux2,
+      ].filter((setId) => selectedSets.has(setId)),
+      draftVariant: selectedVariant,
+    });
 
     // Title
     this.add.text(width / 2, height * 0.12, "COMPILE", {
@@ -29,21 +45,26 @@ export class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Username
-    this.add.text(width / 2 - 160, height * 0.36, "USERNAME", {
+    this.add.text(width / 2 - 230, height * 0.36, "USERNAME", {
       fontSize: "14px", fontFamily: "monospace", color: "#aaaacc",
     }).setOrigin(0.5);
-    const usernameBox = this.add.rectangle(width / 2, height * 0.36, 320, 40, 0x112233).setStrokeStyle(1, 0x3366aa);
-    const usernameText = this.add.text(width / 2, height * 0.36, "", {
+    const usernameBox = this.add.rectangle(width / 2 + 30, height * 0.36, 320, 40, 0x112233).setStrokeStyle(1, 0x3366aa);
+    const usernameText = this.add.text(width / 2 + 30, height * 0.36, "", {
       fontSize: "18px", fontFamily: "monospace", color: "#ffffff",
     }).setOrigin(0.5);
     let username = "";
 
+    if ((import.meta as any).env?.DEV) {
+      username = `P${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      usernameText.setText(username);
+    }
+
     // Room Code (for joining)
-    this.add.text(width / 2 - 160, height * 0.50, "ROOM CODE", {
+    this.add.text(width / 2 - 230, height * 0.44, "ROOM CODE", {
       fontSize: "14px", fontFamily: "monospace", color: "#aaaacc",
     }).setOrigin(0.5);
-    const codeBox = this.add.rectangle(width / 2, height * 0.50, 320, 40, 0x112233).setStrokeStyle(1, 0x3366aa);
-    const codeText = this.add.text(width / 2, height * 0.50, "", {
+    const codeBox = this.add.rectangle(width / 2 + 30, height * 0.44, 320, 40, 0x112233).setStrokeStyle(1, 0x3366aa);
+    const codeText = this.add.text(width / 2 + 30, height * 0.44, "", {
       fontSize: "18px", fontFamily: "monospace", color: "#ffdd88",
     }).setOrigin(0.5);
     let roomInput = "";
@@ -100,83 +121,156 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Status text
-    const statusText = this.add.text(width / 2, height * 0.68, "", {
+    const statusText = this.add.text(width / 2, height * 0.30, "", {
       fontSize: "16px", fontFamily: "monospace", color: "#ff6666",
     }).setOrigin(0.5);
 
-    // Generated code display + copy button
-    const generatedCodeLabel = this.add.text(width / 2 - 160, height * 0.78, "", {
-      fontSize: "22px", fontFamily: "monospace", color: "#00ffcc",
-    }).setOrigin(0, 0.5);
-
-    const copyBtn = this.add.text(width / 2 + 180, height * 0.78, "", {
+    // Copy button for room code — positioned to the right of code textfield
+    const copyCodeBtn = this.add.text(width / 2 + 180, height * 0.44, "⧉", {
       fontSize: "20px", fontFamily: "monospace", color: "#00ffcc",
-      backgroundColor: "#112233", padding: { x: 8, y: 4 },
-    }).setOrigin(0.5).setVisible(false);
-    copyBtn.on("pointerover", () => copyBtn.setColor("#ffffff"));
-    copyBtn.on("pointerout", () => copyBtn.setColor("#00ffcc"));
-    copyBtn.on("pointerdown", () => {
+      backgroundColor: "#112233", padding: { x: 6, y: 4 },
+    }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
+    copyCodeBtn.on("pointerover", () => copyCodeBtn.setColor("#ffffff"));
+    copyCodeBtn.on("pointerout", () => copyCodeBtn.setColor("#00ffcc"));
+    copyCodeBtn.on("pointerdown", () => {
       if (!generatedRoomCode) return;
       navigator.clipboard.writeText(generatedRoomCode).then(() => {
-        copyBtn.setText("✓");
-        this.time.delayedCall(1500, () => copyBtn.setText("⧉"));
+        copyCodeBtn.setText("✓");
+        this.time.delayedCall(1500, () => copyCodeBtn.setText("⧉"));
       });
     });
 
-    // Game mode selector (shown to host only — join side inherits the host's choice)
-    const modes: { mode: GameMode; label: string; desc: string }[] = [
-      { mode: GameMode.AllProtocols, label: "All Protocols",  desc: "All available protocols (grows with new units)" },
-      { mode: GameMode.MainUnit1,    label: "Main Unit 1",    desc: "15 original protocols only" },
-      { mode: GameMode.MainUnit2,    label: "Main Unit 2",    desc: "Coming soon — 15 new protocols" },
-      { mode: GameMode.Random9,      label: "Random 9",       desc: "9 protocols chosen at random" },
-    ];
-    this.add.text(width / 2, height * 0.635, "GAME MODE", {
-      fontSize: "11px", fontFamily: "monospace", color: "#556677",
+    // Protocol set selector
+    this.add.text(width / 2, height * 0.66, "AVAILABLE PROTOCOL SETS", {
+      fontSize: "12px", fontFamily: "monospace", color: "#556677",
     }).setOrigin(0.5);
-    const modeBoxes: Phaser.GameObjects.Rectangle[] = [];
-    const modeLabels: Phaser.GameObjects.Text[] = [];
-    const modeW = 148, modeH = 28, modeGap = 6;
-    const totalModeW = modes.length * modeW + (modes.length - 1) * modeGap;
-    const modeStartX = width / 2 - totalModeW / 2 + modeW / 2;
-    modes.forEach(({ mode, label }, i) => {
-      const mx = modeStartX + i * (modeW + modeGap);
-      const selected = mode === selectedMode;
-      const box = this.add.rectangle(mx, height * 0.67, modeW, modeH,
-        selected ? 0x003322 : 0x0a1520)
-        .setStrokeStyle(1, selected ? 0x00ffcc : 0x223344)
-        .setInteractive({ useHandCursor: true });
-      const lbl = this.add.text(mx, height * 0.67, label, {
-        fontSize: "11px", fontFamily: "monospace",
-        color: selected ? "#00ffcc" : "#445566",
-      }).setOrigin(0.5);
-      box.on("pointerover", () => { if (mode !== selectedMode) box.setStrokeStyle(1, 0x4488aa); });
-      box.on("pointerout",  () => { if (mode !== selectedMode) box.setStrokeStyle(1, 0x223344); });
-      box.on("pointerdown", () => {
-        selectedMode = mode;
-        modeBoxes.forEach((b, j) => {
-          const sel = modes[j].mode === selectedMode;
-          b.setFillStyle(sel ? 0x003322 : 0x0a1520).setStrokeStyle(1, sel ? 0x00ffcc : 0x223344);
-          modeLabels[j].setColor(sel ? "#00ffcc" : "#445566");
-        });
+    const setItems: { setId: ProtocolSet; label: string }[] = [
+      { setId: ProtocolSet.MainUnit1, label: "Main Unit 1" },
+      { setId: ProtocolSet.MainUnit2, label: "Main Unit 2" },
+      { setId: ProtocolSet.Aux1, label: "Aux 1" },
+      { setId: ProtocolSet.Aux2, label: "Aux 2" },
+    ];
+    const setBoxes: Phaser.GameObjects.Rectangle[] = [];
+    const setLabels: Phaser.GameObjects.Text[] = [];
+    const setW = 138, setH = 30, setGap = 10;
+    const totalSetW = setItems.length * setW + (setItems.length - 1) * setGap;
+    const setStartX = width / 2 - totalSetW / 2 + setW / 2;
+
+    const refreshSetButtons = () => {
+      setItems.forEach(({ setId }, i) => {
+        const selected = selectedSets.has(setId);
+        setBoxes[i].setFillStyle(selected ? 0x003322 : 0x0a1520)
+          .setStrokeStyle(1, selected ? 0x00ffcc : 0x223344);
+        setLabels[i].setColor(selected ? "#00ffcc" : "#445566");
       });
-      modeBoxes.push(box);
-      modeLabels.push(lbl);
+    };
+
+    setItems.forEach(({ setId, label }, i) => {
+      const x = setStartX + i * (setW + setGap);
+      const box = this.add.rectangle(x, height * 0.70, setW, setH, 0x0a1520)
+        .setStrokeStyle(1, 0x223344)
+        .setInteractive({ useHandCursor: true });
+      const txt = this.add.text(x, height * 0.70, label, {
+        fontSize: "11px", fontFamily: "monospace", color: "#445566",
+      }).setOrigin(0.5);
+
+      box.on("pointerover", () => box.setStrokeStyle(1, 0x4488aa));
+      box.on("pointerout", () => refreshSetButtons());
+      box.on("pointerdown", () => {
+        const isSelected = selectedSets.has(setId);
+        if (isSelected) {
+          if (setId === ProtocolSet.MainUnit1 && !selectedSets.has(ProtocolSet.MainUnit2)) {
+            statusText.setText("At least one Main Unit must remain selected.");
+            return;
+          }
+          if (setId === ProtocolSet.MainUnit2 && !selectedSets.has(ProtocolSet.MainUnit1)) {
+            statusText.setText("At least one Main Unit must remain selected.");
+            return;
+          }
+          selectedSets.delete(setId);
+        } else {
+          selectedSets.add(setId);
+        }
+        refreshSetButtons();
+      });
+
+      setBoxes.push(box);
+      setLabels.push(txt);
     });
+    refreshSetButtons();
+
+    // Draft variant selector
+    this.add.text(width / 2, height * 0.78, "DRAFT VARIANT", {
+      fontSize: "12px", fontFamily: "monospace", color: "#556677",
+    }).setOrigin(0.5);
+    const variantItems: { variant: DraftVariant; label: string; desc: string }[] = [
+      { variant: DraftVariant.Full, label: "Full", desc: "All selected sets are available in the draft." },
+      { variant: DraftVariant.Limited9, label: "Limited 9", desc: "Randomly choose 9 from selected sets for the draft." },
+      { variant: DraftVariant.Random3, label: "Random 3", desc: "Skip draft and randomize 3 protocols per player." },
+    ];
+    const variantBoxes: Phaser.GameObjects.Rectangle[] = [];
+    const variantLabels: Phaser.GameObjects.Text[] = [];
+    const variantDescs: Phaser.GameObjects.Text[] = [];
+    let draftVariantLocked = false;
+    const variantY0 = height * 0.83;
+    const variantGapY = 0.07;
+
+    const refreshVariantButtons = () => {
+      variantItems.forEach(({ variant }, i) => {
+        const selected = selectedVariant === variant;
+        variantBoxes[i].setFillStyle(selected ? 0x00263d : 0x0a1520)
+          .setStrokeStyle(1, selected ? 0x33bbff : 0x223344)
+          .setAlpha(draftVariantLocked ? 0.55 : 1);
+        variantLabels[i].setColor(selected ? "#33bbff" : "#557799");
+        variantDescs[i].setColor(selected ? "#9fd9ff" : "#446077");
+      });
+    };
+
+    variantItems.forEach(({ variant, label, desc }, i) => {
+      const y = variantY0 + i * (height * variantGapY);
+      const box = this.add.rectangle(width / 2, y, 560, 44, 0x0a1520)
+        .setStrokeStyle(1, 0x223344)
+        .setInteractive({ useHandCursor: true });
+      const title = this.add.text(width / 2 - 250, y - 10, label, {
+        fontSize: "13px", fontFamily: "monospace", color: "#557799", fontStyle: "bold",
+      }).setOrigin(0, 0.5);
+      const detail = this.add.text(width / 2 - 250, y + 10, desc, {
+        fontSize: "10px", fontFamily: "monospace", color: "#446077",
+      }).setOrigin(0, 0.5);
+
+      box.on("pointerover", () => {
+        if (!draftVariantLocked) box.setStrokeStyle(1, 0x4488aa);
+      });
+      box.on("pointerout", () => refreshVariantButtons());
+      box.on("pointerdown", () => {
+        if (draftVariantLocked) {
+          statusText.setText("Draft variant is locked after room creation.");
+          return;
+        }
+        selectedVariant = variant;
+        refreshVariantButtons();
+      });
+
+      variantBoxes.push(box);
+      variantLabels.push(title);
+      variantDescs.push(detail);
+    });
+    refreshVariantButtons();
 
     // Buttons
     const btnStyle = { fontSize: "18px", fontFamily: "monospace", color: "#0a0a0f" };
 
-    const createBtn = this.add.rectangle(width / 2 - 100, height * 0.60, 180, 44, 0x00ffcc)
+    const createBtn = this.add.rectangle(width / 2 - 100, height * 0.58, 180, 44, 0x00ffcc)
       .setInteractive({ useHandCursor: true });
-    this.add.text(width / 2 - 100, height * 0.60, "CREATE ROOM", btnStyle).setOrigin(0.5);
+    this.add.text(width / 2 - 100, height * 0.58, "CREATE ROOM", btnStyle).setOrigin(0.5);
 
-    const joinBtn = this.add.rectangle(width / 2 + 100, height * 0.60, 180, 44, 0x3399ff)
+    const joinBtn = this.add.rectangle(width / 2 + 100, height * 0.58, 180, 44, 0x3399ff)
       .setInteractive({ useHandCursor: true });
-    this.add.text(width / 2 + 100, height * 0.60, "JOIN ROOM", btnStyle).setOrigin(0.5);
+    this.add.text(width / 2 + 100, height * 0.58, "JOIN ROOM", btnStyle).setOrigin(0.5);
 
     createBtn.on("pointerdown", () => {
       if (!username.trim()) { statusText.setText("Enter a username first."); return; }
-      socket.emit("create_room", { username: username.trim(), gameMode: selectedMode });
+      socket.emit("create_room", { username: username.trim(), lobbySettings: currentLobbySettings() });
     });
     joinBtn.on("pointerdown", () => {
       if (!username.trim()) { statusText.setText("Enter a username first."); return; }
@@ -188,9 +282,11 @@ export class MenuScene extends Phaser.Scene {
     socket.on("room_created", ({ roomCode, playerIndex }) => {
       myPlayerIndex = playerIndex;
       generatedRoomCode = roomCode;
+      codeText.setText(roomCode);
+      copyCodeBtn.setVisible(true);
+      draftVariantLocked = true;
+      refreshVariantButtons();
       statusText.setText("Waiting for opponent…");
-      generatedCodeLabel.setText(`Share this code: ${roomCode}`);
-      copyBtn.setText("⧉").setVisible(true).setInteractive({ useHandCursor: true });
     });
 
     socket.on("room_joined", ({ playerIndex }) => {
@@ -204,6 +300,10 @@ export class MenuScene extends Phaser.Scene {
 
     socket.on("game_starting", ({ draftState }) => {
       this.scene.start("DraftScene", { draftState, myIndex: myPlayerIndex });
+    });
+
+    socket.on("state_sync", (payload) => {
+      this.scene.start("GameScene", { initialPayload: payload, myIndex: myPlayerIndex });
     });
 
     // ── DEV shortcut ───────────────────────────────────────────────────────
@@ -244,7 +344,7 @@ export class MenuScene extends Phaser.Scene {
     if (params.has("host")) {
       username = "P0";
       usernameText.setText(username);
-      socket.emit("create_room", { username, gameMode: selectedMode });
+      socket.emit("create_room", { username, lobbySettings: currentLobbySettings() });
 
       // After room is created, show a "Open tab 2" link that auto-joins
       socket.once("room_created", ({ roomCode }) => {

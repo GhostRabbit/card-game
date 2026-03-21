@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { createRandomizedMockView } from "../data/mockGameState";
+import { TurnPhase } from "@compile/shared";
+import { createRandomizedMockView, createMockViewForEffect } from "../data/mockGameState";
 
 export class MockGameScene extends Phaser.Scene {
   constructor() {
@@ -7,10 +8,24 @@ export class MockGameScene extends Phaser.Scene {
   }
 
   create(): void {
+    const params = new URLSearchParams(window.location.search);
+    const effectType = params.get("effect");
+
+    const payload = effectType
+      ? createMockViewForEffect(effectType)
+      : createRandomizedMockView();
+
+    // For dedicated effect test URLs, start in ACTION first and let GameScene
+    // promote to EffectResolution. This mirrors when effects normally appear.
+    const initialPayload = effectType
+      ? { view: payload.view, turnPhase: TurnPhase.Action }
+      : payload;
+
     this.scene.start("GameScene", {
-      initialPayload: createRandomizedMockView(),
+      initialPayload,
       myIndex: 0,
       devMode: true,
+      mockEffectType: effectType ?? undefined,
     });
   }
 }

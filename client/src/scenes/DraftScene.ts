@@ -1,6 +1,7 @@
 import Phaser from "phaser";
-import { DraftState, GameMode } from "@compile/shared";
+import { DraftState, DraftVariant, ProtocolSet } from "@compile/shared";
 import { getSocket } from "../network/SocketClient";
+import { PROTOCOL_COLORS } from "../data/cardDefs";
 
 interface DraftSceneData {
   draftState: DraftState;
@@ -13,6 +14,7 @@ const PICK_ORDER_LABELS = ["YOU", "OPP", "OPP", "YOU", "YOU", "OPP"];
 export class DraftScene extends Phaser.Scene {
   private draftState!: DraftState;
   private myIndex: 0 | 1 = 0;
+  private draftPool: DraftState["availableProtocols"] = [];
   /** Name lookup for ALL protocols, built once before any are removed */
   private allProtocolNames = new Map<string, string>();
 
@@ -23,6 +25,7 @@ export class DraftScene extends Phaser.Scene {
   init(data: DraftSceneData): void {
     this.draftState = data.draftState;
     this.myIndex = data.myIndex ?? 0;
+    this.draftPool = [...data.draftState.availableProtocols];
     // Build full name map now, while all protocols are still present
     for (const p of data.draftState.availableProtocols) {
       this.allProtocolNames.set(p.id, p.name);
@@ -32,6 +35,21 @@ export class DraftScene extends Phaser.Scene {
   // Dynamic objects we rebuild on every state update
   private dynamicGroup!: Phaser.GameObjects.Group;
   private pickOrderDots: Phaser.GameObjects.Rectangle[] = [];
+
+  private static shadeColor(color: number, factor: number): number {
+    const r = Math.max(0, Math.min(255, Math.floor(((color >> 16) & 0xff) * factor)));
+    const g = Math.max(0, Math.min(255, Math.floor(((color >> 8) & 0xff) * factor)));
+    const b = Math.max(0, Math.min(255, Math.floor((color & 0xff) * factor)));
+    return (r << 16) | (g << 8) | b;
+  }
+
+  private static textColorForBg(color: number): string {
+    const r = (color >> 16) & 0xff;
+    const g = (color >> 8) & 0xff;
+    const b = color & 0xff;
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return luma > 140 ? "#0a0f18" : "#eef7ff";
+  }
 
   create(): void {
     const socket = getSocket();
@@ -59,14 +77,22 @@ export class DraftScene extends Phaser.Scene {
       fontSize: "30px", fontFamily: "monospace", color: "#00ffcc", fontStyle: "bold",
     }).setOrigin(0.5);
 
-    const modeLabel: Record<GameMode, string> = {
-      [GameMode.AllProtocols]: "All Protocols",
-      [GameMode.MainUnit1]:    "Main Unit 1",
-      [GameMode.MainUnit2]:    "Main Unit 2",
-      [GameMode.Random9]:      "Random 9",
+    const variantLabel: Record<DraftVariant, string> = {
+      [DraftVariant.Full]: "Full",
+      [DraftVariant.Limited9]: "Limited 9",
+      [DraftVariant.Random3]: "Random 3",
     };
+    const setLabel: Record<ProtocolSet, string> = {
+      [ProtocolSet.MainUnit1]: "Main Unit 1",
+      [ProtocolSet.MainUnit2]: "Main Unit 2",
+      [ProtocolSet.Aux1]: "Aux 1",
+      [ProtocolSet.Aux2]: "Aux 2",
+    };
+    const setText = this.draftState.lobbySettings.selectedProtocolSets
+      .map((s) => setLabel[s] ?? s)
+      .join(", ");
     this.add.text(width / 2, L.titleY + 26,
-      `Mode: ${modeLabel[this.draftState.gameMode] ?? this.draftState.gameMode}`, {
+      `Variant: ${variantLabel[this.draftState.lobbySettings.draftVariant] ?? this.draftState.lobbySettings.draftVariant} | Sets: ${setText}`, {
         fontSize: "12px", fontFamily: "monospace", color: "#556677",
       }).setOrigin(0.5);
 
@@ -150,37 +176,109 @@ export class DraftScene extends Phaser.Scene {
       }).setOrigin(0.5), true
     );
 
-    // Protocol cards — grid starts at L.row0Y (always below banner)
-    const cols = 3;
-    const cardW = 230, cardH = L.cardH, gapX = 28;
-    const totalW = cols * cardW + (cols - 1) * gapX;
-    const startX = (width - totalW) / 2 + cardW / 2;
-    const rowYs = [L.row0Y, L.row1Y];
+    // Protocol cards — auto-fit grid to keep all available protocols on-screen.
+    const availableIds = new Set(state.availableProtocols.map((p) => p.id));
+    const pickedIds = new Set(state.picks.map((p) => p.protocolId));
+    const cardCount = this.draftPool.length;
+    const gridLeft = 20;
+    const gridRight = width - 20;
+    const gridTop = L.cardsTop;
+    const gridBottom = L.summaryY - L.summaryH / 2 - 10;
+    const gridW = Math.max(1, gridRight - gridLeft);
+    const gridH = Math.max(1, gridBottom - gridTop);
+    const minGapX = 8;
+    const minGapY = 8;
+    const targetAspect = 130 / 230; // keep the current wide-card look
 
-    state.availableProtocols.forEach((proto, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const x = startX + col * (cardW + gapX);
-      const y = rowYs[row] ?? (rowYs[1] + cardH + L.cardGapY);
+    let best = {
+      cols: Math.max(1, Math.min(3, cardCount || 1)),
+      rows: Math.max(1, Math.ceil((cardCount || 1) / Math.max(1, Math.min(3, cardCount || 1)))),
+      cardW: 120,
+      cardH: 120 * targetAspect,
+      gapX: minGapX,
+      gapY: minGapY,
+    };
 
-      const bg = this.add.rectangle(0, 0, cardW, cardH,
-        isMyTurn ? 0x0d2035 : 0x0a1520)
-        .setStrokeStyle(2, isMyTurn ? 0x00aaff : 0x1a3355);
-      const nameT = this.add.text(0, -36, proto.name, {
-        fontSize: "19px", fontFamily: "monospace", color: "#00ffcc", fontStyle: "bold",
+    const minCols = cardCount <= 6 ? 3 : 4;
+    const maxCols = Math.max(minCols, Math.min(cardCount || 1, 8));
+    for (let cols = minCols; cols <= maxCols; cols++) {
+      const rows = Math.max(1, Math.ceil((cardCount || 1) / cols));
+      const slotW = (gridW - (cols - 1) * minGapX) / cols;
+      const slotH = (gridH - (rows - 1) * minGapY) / rows;
+      if (slotW <= 0 || slotH <= 0) continue;
+
+      const cardW = Math.min(slotW, slotH / targetAspect);
+      const cardH = cardW * targetAspect;
+      const score = cardW;
+      if (score > best.cardW) {
+        best = {
+          cols,
+          rows,
+          cardW,
+          cardH,
+          gapX: cols > 1 ? (gridW - cols * cardW) / (cols - 1) : 0,
+          gapY: rows > 1 ? (gridH - rows * cardH) / (rows - 1) : 0,
+        };
+      }
+    }
+
+    const totalW = best.cols * best.cardW + (best.cols - 1) * best.gapX;
+    const totalH = best.rows * best.cardH + (best.rows - 1) * best.gapY;
+    const startX = width / 2 - totalW / 2 + best.cardW / 2;
+    const startY = gridTop + (gridH - totalH) / 2 + best.cardH / 2;
+
+    this.draftPool.forEach((proto, i) => {
+      const col = i % best.cols;
+      const row = Math.floor(i / best.cols);
+      const x = startX + col * (best.cardW + best.gapX);
+      const y = startY + row * (best.cardH + best.gapY);
+
+      const isAvailable = availableIds.has(proto.id);
+      const isDrafted = pickedIds.has(proto.id);
+
+      const protoColor = PROTOCOL_COLORS.get(proto.id) ?? 0x1a3a5c;
+      const fillNormal = isDrafted
+        ? 0x3e434a
+        : isMyTurn
+          ? DraftScene.shadeColor(protoColor, 1.0)
+          : DraftScene.shadeColor(protoColor, 0.72);
+      const fillHover = DraftScene.shadeColor(protoColor, 1.25);
+      const strokeNormal = isDrafted ? 0x6b7380 : DraftScene.shadeColor(protoColor, 1.45);
+      const titleColor = DraftScene.textColorForBg(fillNormal);
+      const descColor = isDrafted ? "#c8d0da" : (isMyTurn ? "#e4f0ff" : "#b8c9df");
+
+      const bg = this.add.rectangle(0, 0, best.cardW, best.cardH, fillNormal)
+        .setStrokeStyle(2, strokeNormal);
+      const nameT = this.add.text(0, -best.cardH * 0.28, proto.name, {
+        fontSize: `${Math.max(11, Math.floor(best.cardW * 0.082))}px`,
+        fontFamily: "monospace",
+        color: titleColor,
+        fontStyle: "bold",
       }).setOrigin(0.5);
-      const descT = this.add.text(0, 8, proto.description, {
-        fontSize: "11px", fontFamily: "monospace", color: "#7788aa",
-        wordWrap: { width: cardW - 16 }, align: "center",
+      const descT = this.add.text(0, best.cardH * 0.06, proto.description, {
+        fontSize: `${Math.max(8, Math.floor(best.cardW * 0.047))}px`,
+        fontFamily: "monospace",
+        color: descColor,
+        wordWrap: { width: best.cardW - 14 },
+        align: "center",
       }).setOrigin(0.5);
 
       const container = this.add.container(x, y, [bg, nameT, descT]);
+      if (isDrafted) {
+        container.setScale(0.5);
+      }
       this.dynamicGroup.add(container, true);
 
-      if (isMyTurn) {
+      if (isMyTurn && isAvailable && !isDrafted) {
         bg.setInteractive({ useHandCursor: true });
-        bg.on("pointerover", () => { bg.setFillStyle(0x1a4060); bg.setStrokeStyle(2, 0x00ffcc); });
-        bg.on("pointerout",  () => { bg.setFillStyle(0x0d2035); bg.setStrokeStyle(2, 0x00aaff); });
+        bg.on("pointerover", () => {
+          bg.setFillStyle(fillHover);
+          bg.setStrokeStyle(2, 0x00ffcc);
+        });
+        bg.on("pointerout", () => {
+          bg.setFillStyle(fillNormal);
+          bg.setStrokeStyle(2, strokeNormal);
+        });
         bg.on("pointerdown", () => {
           bg.disableInteractive();
           getSocket().emit("draft_pick", { protocolId: proto.id });

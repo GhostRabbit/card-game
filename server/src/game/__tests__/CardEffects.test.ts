@@ -165,15 +165,16 @@ describe("executeEffect — discard", () => {
 // ─── executeEffect: opponent_discard ─────────────────────────────────────────
 
 describe("executeEffect — opponent_discard", () => {
-  it("removes cards from the opponent's hand", () => {
+  it("queues discard sub-effects for the opponent to choose", () => {
     const state = makeState();
     state.players[1].hand.push(card("c1"), card("c2"), card("c3"));
 
     executeEffect(state, effect("opponent_discard", 0, { amount: 2 }));
 
-    expect(state.players[1].hand).toHaveLength(1);
-    expect(state.trashes[1]).toHaveLength(2);
-    expect(state.players[1].trashSize).toBe(2);
+    const discardEffects = state.effectQueue.filter(e => e.type === "discard" && e.ownerIndex === 1);
+    expect(discardEffects).toHaveLength(2);
+    // Cards are not removed yet — opponent must choose
+    expect(state.players[1].hand).toHaveLength(3);
   });
 
   it("does not touch the owner's hand", () => {
@@ -1868,21 +1869,27 @@ describe("executeEffect — flip", () => {
 // ─── executeEffect: opponent_discard_reveal ───────────────────────────────────
 
 describe("executeEffect — opponent_discard_reveal", () => {
-  it("discards N cards from opponent hand", () => {
+  it("queues discard sub-effects for the opponent to choose", () => {
     const state = makeState();
     state.players[1].hand.push(card("c1"), card("c2"), card("c3"));
 
     executeEffect(state, effect("opponent_discard_reveal", 0, { amount: 2 }));
 
-    expect(state.players[1].hand).toHaveLength(1);
-    expect(state.trashes[1]).toHaveLength(2);
+    const discardEffects = state.effectQueue.filter(e => e.type === "discard" && e.ownerIndex === 1);
+    expect(discardEffects).toHaveLength(2);
+    // Cards are not removed yet — opponent must choose
+    expect(state.players[1].hand).toHaveLength(3);
   });
 
-  it("sets revealOpponentHandFor to the effect owner", () => {
+  it("sets revealOpponentHandFor to the effect owner when opponent resolves discard", () => {
     const state = makeState();
     state.players[1].hand.push(card("c1"));
 
     executeEffect(state, effect("opponent_discard_reveal", 0, { amount: 1 }));
+
+    // Simulate opponent choosing c1 to discard
+    const queued = state.effectQueue.find(e => e.type === "discard" && e.ownerIndex === 1)!;
+    executeEffect(state, { ...queued, payload: { ...queued.payload, targetInstanceId: "c1" } });
 
     expect(state.revealOpponentHandFor).toBe(0);
   });
@@ -3344,6 +3351,9 @@ describe("after_opp_discard_draw passive hook — plg_1 triggers draw after oppo
     state.decks[0] = [{ instanceId: "dk1", defId: "spd_5", face: CardFace.FaceDown }];
     state.players[0].deckSize = 1;
     executeEffect(state, effect("opponent_discard", 0, { amount: 1 }));
+    // Opponent resolves their queued discard by choosing "oppcard"
+    const queued = state.effectQueue.find(e => e.type === "discard" && e.ownerIndex === 1)!;
+    executeEffect(state, { ...queued, payload: { ...queued.payload, targetInstanceId: "oppcard" } });
     expect(state.players[0].hand).toHaveLength(1);
   });
 

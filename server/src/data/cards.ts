@@ -19,8 +19,18 @@ export const PROTOCOLS: ProtocolDef[] = [
 ];
 
 /** IDs belonging to each release unit (used for game-mode filtering) */
-export const MAIN_UNIT_1_IDS = new Set(PROTOCOLS.map((p) => p.id));
-export const MAIN_UNIT_2_IDS = new Set<string>(); // placeholder — no cards yet
+export const MAIN_UNIT_1_IDS = new Set<string>([
+  "proto_spd", "proto_drk", "proto_dth", "proto_fir",
+]);
+export const MAIN_UNIT_2_IDS = new Set<string>([
+  "proto_grv", "proto_hat", "proto_lif", "proto_lgt",
+]);
+export const AUX_1_IDS = new Set<string>([
+  "proto_lov", "proto_mtl", "proto_plg", "proto_psy",
+]);
+export const AUX_2_IDS = new Set<string>([
+  "proto_spr", "proto_wtr", "proto_apy",
+]);
 
 export const COMMAND_CARDS: CommandCardDef[] = [
   // ── APATHY (proto_apy) ────────────────────────────────────────────────────────────

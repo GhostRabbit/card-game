@@ -18,7 +18,7 @@ export interface ServerGameState extends GameState {
   /** Effects waiting for player confirmation before they execute */
   effectQueue: PendingEffect[];
   /** Tracks which turn-flow stage we paused at so we can resume correctly */
-  effectQueueContext: "immediate" | "start" | "end" | null;
+  effectQueueContext: "immediate" | "cache" | "start" | "end" | null;
   /** When true the clear-cache discard at end of turn is skipped once */
   skipCheckCache: boolean;
   /** When true the active player cannot compile this turn (consumed once) */
@@ -345,7 +345,23 @@ export function endTurn(state: ServerGameState): void {
     state.pendingLogs.push("  skip_check_cache: clear-cache discard skipped");
   } else {
     const over5 = state.players[pi].hand.length - 5;
-    if (over5 > 0) discardFromHand(state, pi, over5);
+    if (over5 > 0) {
+      for (let i = 0; i < over5; i++) {
+        state.effectQueue.push({
+          id: uuidv4(),
+          cardDefId: "cache_discard",
+          cardName: "Cache",
+          type: "discard",
+          description: "Choose a card to discard for Cache.",
+          ownerIndex: pi,
+          trigger: "immediate",
+          payload: { reason: "cache" },
+        });
+      }
+      state.effectQueueContext = "cache";
+      state.turnPhase = TurnPhase.EffectResolution;
+      return;
+    }
   }
   // Trigger after_clear_cache_draw passives (fires whether or not a discard occurred)
   for (const line of state.players[pi].lines) {
@@ -440,6 +456,8 @@ export function continueAfterEffects(state: ServerGameState): void {
     finishTurn(state);
   } else if (ctx === "start") {
     processAutoPhases(state);
+  } else if (ctx === "cache") {
+    endTurn(state);
   }
 }
 

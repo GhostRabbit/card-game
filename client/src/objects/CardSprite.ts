@@ -262,6 +262,19 @@ export class CardSprite extends Phaser.GameObjects.Container {
     this.bg.on("pointerout",  () => onHover(null));
   }
 
+  /**
+   * Reports whether the primary pointer is currently pressed on this card.
+   * Useful for temporary preview states (for example hold-to-peek behaviors).
+   */
+  addPressHold(onHoldChange: (isHolding: boolean) => void): void {
+    if (!this.bg.input) this.bg.setInteractive();
+    const stopHold = () => onHoldChange(false);
+    this.bg.on("pointerdown", () => onHoldChange(true));
+    this.bg.on("pointerup", stopHold);
+    this.bg.on("pointerupoutside", stopHold);
+    this.bg.on("pointerout", stopHold);
+  }
+
   override destroy(fromScene?: boolean): void {
     super.destroy(fromScene);
   }

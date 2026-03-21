@@ -1,5 +1,5 @@
 import { Socket } from "socket.io";
-import { ClientToServerEvents, ServerToClientEvents, GameMode } from "@compile/shared";
+import { ClientToServerEvents, ServerToClientEvents, LobbySettings } from "@compile/shared";
 import { Room } from "./Room";
 
 type AppSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -9,10 +9,10 @@ export class RoomManager {
   /** socket id → room code */
   private socketToRoom = new Map<string, string>();
 
-  createRoom(socket: AppSocket, username: string, gameMode?: GameMode): void {
+  createRoom(socket: AppSocket, username: string, lobbySettings?: LobbySettings): void {
     const code = this.generateCode();
     const room = new Room(code);
-    room["gameMode"] = gameMode ?? GameMode.AllProtocols; // store for when 2nd player joins
+    room.setLobbySettings(lobbySettings);
     this.rooms.set(code, room);
     room.addPlayer(socket, username);
     this.socketToRoom.set(socket.id, code);
@@ -39,7 +39,7 @@ export class RoomManager {
 
     // Both players present — start draft
     if (room.playerCount === 2) {
-      room.startDraft((room as any)["gameMode"] ?? GameMode.AllProtocols);
+      room.startDraft();
     }
   }
 

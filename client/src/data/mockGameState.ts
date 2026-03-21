@@ -1,4 +1,4 @@
-import { PlayerView, TurnPhase, CardFace, ProtocolStatus } from "@compile/shared";
+import { PlayerView, TurnPhase, CardFace, ProtocolStatus, PendingEffect } from "@compile/shared";
 import { CARD_DEFS_CLIENT } from "./cardDefs";
 
 /** A realistic mock PlayerView for dev/testing — bypasses server entirely */
@@ -217,4 +217,112 @@ export function createRandomizedMockView(): { view: PlayerView; turnPhase: TurnP
   };
 
   return { view, turnPhase: TurnPhase.Action };
+}
+
+// ── Effect-scenario mock views ────────────────────────────────────────────────
+
+/**
+ * A catalogue of representative pending effects for each interactive effect type.
+ * Used by MockGameScene when `?effect=TYPE` is in the URL to put the game
+ * directly into EffectResolution so Playwright tests can exercise the UI.
+ */
+const EFFECT_CATALOGUE: Record<string, PendingEffect> = {
+  draw: {
+    id: "mock-eff-1", cardDefId: "drk_0", cardName: "Darkness", type: "draw",
+    description: "Draw 3 cards.", ownerIndex: 0, trigger: "immediate",
+    payload: { amount: 3 }, sourceInstanceId: "l0a",
+  },
+  discard: {
+    id: "mock-eff-1", cardDefId: "apy_5", cardName: "Apathy", type: "discard",
+    description: "You discard 1 card.", ownerIndex: 0, trigger: "immediate",
+    payload: { amount: 1 },
+  },
+  flip: {
+    id: "mock-eff-1", cardDefId: "apy_3", cardName: "Apathy", type: "flip",
+    description: "Flip 1 of your opponent's face-up cards.", ownerIndex: 0, trigger: "immediate",
+    payload: { targets: "opponent_faceup" },
+  },
+  flip_optional: {
+    id: "mock-eff-1", cardDefId: "spr_2", cardName: "Spirit", type: "flip",
+    description: "You may flip 1 card.", ownerIndex: 0, trigger: "immediate",
+    payload: { targets: "any_card", optional: true },
+  },
+  delete: {
+    id: "mock-eff-1", cardDefId: "hat_0", cardName: "Hate", type: "delete",
+    description: "Delete 1 card.", ownerIndex: 0, trigger: "immediate",
+    payload: { targets: "any_card" },
+  },
+  shift: {
+    id: "mock-eff-1", cardDefId: "spd_3", cardName: "Speed", type: "shift",
+    description: "Shift 1 of your other cards.", ownerIndex: 0, trigger: "immediate",
+    payload: { targets: "own_others" }, sourceInstanceId: "l0a",
+  },
+  return: {
+    id: "mock-eff-1", cardDefId: "wtr_4", cardName: "Water", type: "return",
+    description: "Return 1 of your cards.", ownerIndex: 0, trigger: "immediate",
+    payload: { targets: "own_any" },
+  },
+  exchange_hand: {
+    id: "mock-eff-1", cardDefId: "lov_3", cardName: "Love", type: "exchange_hand",
+    description: "Take 1 random card from your opponent's hand. Give 1 card from your hand to your opponent.",
+    ownerIndex: 0, trigger: "immediate", payload: {},
+  },
+  give_to_draw: {
+    id: "mock-eff-1", cardDefId: "lov_1", cardName: "Love", type: "give_to_draw",
+    description: "You may give 1 card from your hand to your opponent. If you do, draw 2 cards.",
+    ownerIndex: 0, trigger: "end", payload: {},
+  },
+  reveal_own_hand: {
+    id: "mock-eff-1", cardDefId: "lov_4", cardName: "Love", type: "reveal_own_hand",
+    description: "Reveal 1 card from your hand.", ownerIndex: 0, trigger: "immediate", payload: {},
+  },
+  discard_to_flip: {
+    id: "mock-eff-1", cardDefId: "fir_3", cardName: "Fire", type: "discard_to_flip",
+    description: "You may discard 1 card. If you do, flip 1 card.", ownerIndex: 0, trigger: "end",
+    payload: {},
+  },
+  play_facedown: {
+    id: "mock-eff-1", cardDefId: "drk_3", cardName: "Darkness", type: "play_facedown",
+    description: "Play 1 card face-down in another line.", ownerIndex: 0, trigger: "immediate",
+    payload: {}, sourceInstanceId: "l0a",
+  },
+  opponent_discard: {
+    id: "mock-eff-1", cardDefId: "plg_0", cardName: "Plague", type: "opponent_discard",
+    description: "Your opponent discards 1 card.", ownerIndex: 0, trigger: "immediate",
+    payload: { amount: 1 },
+  },
+  flip_self: {
+    id: "mock-eff-1", cardDefId: "wtr_0", cardName: "Water", type: "flip_self",
+    description: "Flip this card.", ownerIndex: 0, trigger: "immediate",
+    payload: {}, sourceInstanceId: "l0a",
+  },
+  deny_compile: {
+    id: "mock-eff-1", cardDefId: "mtl_1", cardName: "Metal", type: "deny_compile",
+    description: "Your opponent cannot compile next turn.", ownerIndex: 0, trigger: "immediate",
+    payload: {},
+  },
+  rearrange_protocols: {
+    id: "mock-eff-1", cardDefId: "wtr_2", cardName: "Water", type: "rearrange_protocols",
+    description: "Rearrange your protocols.", ownerIndex: 0, trigger: "immediate",
+    payload: { whose: "self" },
+  },
+};
+
+/**
+ * A fixed mock view (not randomized) seeded with a specific `pendingEffect`
+ * and `TurnPhase.EffectResolution`.  Used by MockGameScene when ?effect=TYPE.
+ */
+export function createMockViewForEffect(effectType: string): { view: PlayerView; turnPhase: TurnPhase } {
+  const { view } = createMockView();
+
+  const effect = EFFECT_CATALOGUE[effectType] ?? {
+    id: "mock-eff-fallback", cardDefId: "drk_0", cardName: "Darkness", type: effectType,
+    description: `${effectType} (mock)`, ownerIndex: 0 as 0 | 1, trigger: "immediate" as const,
+    payload: {},
+  };
+
+  view.pendingEffect = effect;
+  view.isActivePlayer = true;
+
+  return { view, turnPhase: TurnPhase.EffectResolution };
 }

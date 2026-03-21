@@ -16,12 +16,12 @@ const roomManager = new RoomManager();
 io.on("connection", (socket) => {
   console.log(`[+] Connected: ${socket.id}`);
 
-  socket.on("create_room", ({ username, gameMode }) => {
+  socket.on("create_room", ({ username, lobbySettings }) => {
     if (!username?.trim()) {
       socket.emit("room_error", { message: "Username required." });
       return;
     }
-    roomManager.createRoom(socket, username.trim(), gameMode);
+    roomManager.createRoom(socket, username.trim(), lobbySettings);
   });
 
   socket.on("join_room", ({ username, roomCode }) => {

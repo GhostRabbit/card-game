@@ -7,7 +7,16 @@
 npm install
 ```
 
-### Run (two terminals)
+### Run (one command)
+```bash
+npm run dev
+```
+
+This starts both services with labeled logs:
+- `SERVER` on `http://localhost:3000`
+- `CLIENT` on `http://localhost:5173`
+
+### Run (two terminals, optional)
 ```bash
 # Terminal 1 — game server (port 3000)
 npm run dev:server
@@ -15,6 +24,20 @@ npm run dev:server
 # Terminal 2 — Phaser client (port 5173)
 npm run dev:client
 ```
+
+### Quick server overview
+```bash
+npm run dev:status
+```
+
+Shows whether the client and server are currently running, their URLs, and which command to run for anything that is stopped.
+
+### Stop both dev servers
+```bash
+npm run dev:stop
+```
+
+Stops processes listening on the default dev ports (`3000` for server and `5173` for client).
 
 Open **two browser tabs** at `http://localhost:5173`:
 1. Tab 1: Enter a username → click **CREATE ROOM** → copy the 6-char code shown.

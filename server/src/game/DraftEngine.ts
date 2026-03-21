@@ -5,13 +5,32 @@ import {
   ProtocolStatus,
   CardInstance,
   CardFace,
-  GameMode,
+  DraftVariant,
+  LobbySettings,
+  ProtocolSet,
 } from "@compile/shared";
 import { v4 as uuidv4 } from "uuid";
-import { getCardsForProtocol, PROTOCOLS, MAIN_UNIT_1_IDS, MAIN_UNIT_2_IDS } from "../data/cards";
+import {
+  getCardsForProtocol,
+  PROTOCOLS,
+  MAIN_UNIT_1_IDS,
+  MAIN_UNIT_2_IDS,
+  AUX_1_IDS,
+  AUX_2_IDS,
+} from "../data/cards";
 
 /** Pick order for a 3-protocol draft: [0,1,1,0,0,1] = player0 picks 1, then player1 picks 2, then player0 picks 2 */
 const PICK_ORDER: Array<0 | 1> = [0, 1, 1, 0, 0, 1];
+
+export const DEFAULT_LOBBY_SETTINGS: LobbySettings = {
+  selectedProtocolSets: [
+    ProtocolSet.MainUnit1,
+    ProtocolSet.MainUnit2,
+    ProtocolSet.Aux1,
+    ProtocolSet.Aux2,
+  ],
+  draftVariant: DraftVariant.Limited9,
+};
 
 export function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -22,30 +41,95 @@ export function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function poolForMode(mode: GameMode): ProtocolDef[] {
-  switch (mode) {
-    case GameMode.MainUnit1:
-      return PROTOCOLS.filter((p) => MAIN_UNIT_1_IDS.has(p.id));
-    case GameMode.MainUnit2:
-      return PROTOCOLS.filter((p) => MAIN_UNIT_2_IDS.has(p.id));
-    case GameMode.Random9: {
-      const all = PROTOCOLS.filter((p) => MAIN_UNIT_1_IDS.has(p.id) || MAIN_UNIT_2_IDS.has(p.id));
-      return shuffle(all).slice(0, 9);
-    }
-    case GameMode.AllProtocols:
+function protocolIdsForSet(setId: ProtocolSet): Set<string> {
+  switch (setId) {
+    case ProtocolSet.MainUnit1:
+      return MAIN_UNIT_1_IDS;
+    case ProtocolSet.MainUnit2:
+      return MAIN_UNIT_2_IDS;
+    case ProtocolSet.Aux1:
+      return AUX_1_IDS;
+    case ProtocolSet.Aux2:
+      return AUX_2_IDS;
     default:
-      return [...PROTOCOLS];
+      return new Set<string>();
   }
 }
 
-export function createInitialDraftState(gameMode: GameMode = GameMode.AllProtocols): DraftState {
+export function normalizeLobbySettings(input?: LobbySettings): LobbySettings {
+  const selected = new Set<ProtocolSet>(input?.selectedProtocolSets ?? DEFAULT_LOBBY_SETTINGS.selectedProtocolSets);
+  if (!selected.has(ProtocolSet.MainUnit1) && !selected.has(ProtocolSet.MainUnit2)) {
+    selected.add(ProtocolSet.MainUnit1);
+  }
+
   return {
-    availableProtocols: poolForMode(gameMode),
+    selectedProtocolSets: [
+      ProtocolSet.MainUnit1,
+      ProtocolSet.MainUnit2,
+      ProtocolSet.Aux1,
+      ProtocolSet.Aux2,
+    ].filter((s) => selected.has(s)),
+    draftVariant: input?.draftVariant ?? DEFAULT_LOBBY_SETTINGS.draftVariant,
+  };
+}
+
+function poolForSettings(settings: LobbySettings): ProtocolDef[] {
+  const selectedIds = new Set<string>();
+  for (const setId of settings.selectedProtocolSets) {
+    for (const id of protocolIdsForSet(setId)) {
+      selectedIds.add(id);
+    }
+  }
+  const base = PROTOCOLS.filter((p) => selectedIds.has(p.id));
+  if (settings.draftVariant === DraftVariant.Limited9) {
+    return shuffle(base).slice(0, 9);
+  }
+  return base;
+}
+
+export function createInitialDraftState(lobbySettings?: LobbySettings): DraftState {
+  const normalized = normalizeLobbySettings(lobbySettings);
+  return {
+    availableProtocols: poolForSettings(normalized),
     picks: [],
     currentPickerIndex: PICK_ORDER[0],
     pickOrder: PICK_ORDER,
     done: false,
-    gameMode,
+    lobbySettings: normalized,
+  };
+}
+
+export function createRandomThreeDraftState(lobbySettings?: LobbySettings): DraftState | { error: string } {
+  const normalized = normalizeLobbySettings(lobbySettings);
+  const pool = PROTOCOLS.filter((p) => {
+    const selected = new Set(normalized.selectedProtocolSets);
+    return (selected.has(ProtocolSet.MainUnit1) && MAIN_UNIT_1_IDS.has(p.id)) ||
+      (selected.has(ProtocolSet.MainUnit2) && MAIN_UNIT_2_IDS.has(p.id)) ||
+      (selected.has(ProtocolSet.Aux1) && AUX_1_IDS.has(p.id)) ||
+      (selected.has(ProtocolSet.Aux2) && AUX_2_IDS.has(p.id));
+  });
+
+  if (pool.length < 6) {
+    return { error: "Selected protocol sets do not contain enough protocols for Random 3." };
+  }
+
+  const chosen = shuffle(pool).slice(0, 6);
+  const picks: DraftState["picks"] = [
+    { playerIndex: 0, protocolId: chosen[0].id },
+    { playerIndex: 0, protocolId: chosen[1].id },
+    { playerIndex: 0, protocolId: chosen[2].id },
+    { playerIndex: 1, protocolId: chosen[3].id },
+    { playerIndex: 1, protocolId: chosen[4].id },
+    { playerIndex: 1, protocolId: chosen[5].id },
+  ];
+
+  return {
+    availableProtocols: [],
+    picks,
+    currentPickerIndex: 0,
+    pickOrder: PICK_ORDER,
+    done: true,
+    lobbySettings: normalized,
   };
 }
 
@@ -71,7 +155,7 @@ export function applyDraftPick(
     currentPickerIndex: done ? 0 : PICK_ORDER[nextPickIndex],
     pickOrder: state.pickOrder,
     done,
-    gameMode: state.gameMode,
+    lobbySettings: state.lobbySettings,
   };
 }
 
