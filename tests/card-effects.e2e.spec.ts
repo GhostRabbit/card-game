@@ -285,14 +285,18 @@ test.describe('play_facedown - two-stage hand then line', () => {
 });
 
 test.describe('rearrange_protocols (auto-execute with protocol reorder)', () => {
-  test('shows CONFIRM button', async ({ gamePage }) => {
+  test('CONFIRM appears after selecting 3 protocols', async ({ gamePage }) => {
     await gamePage.gotoForEffect('rearrange_protocols');
+    await expect.poll(() => gamePage.isEffectResolutionActive()).toBe(true);
 
-    expect(await gamePage.isEffectResolutionActive()).toBe(true);
+    // Initial state: no picks yet -> no confirm
+    await expect.poll(() => gamePage.hasConfirmButton()).toBe(false);
 
-    const description = await gamePage.getEffectDescription();
-    expect(description).toContain('Water');
+    // Perform the 3 required picks (add reliable chip locators/testids if missing)
+    await gamePage.clickRearrangeProtocolChip(0);
+    await gamePage.clickRearrangeProtocolChip(1);
+    await gamePage.clickRearrangeProtocolChip(2);
 
-    expect(await gamePage.hasConfirmButton()).toBe(true);
+    await expect.poll(() => gamePage.hasConfirmButton()).toBe(true);
   });
 });

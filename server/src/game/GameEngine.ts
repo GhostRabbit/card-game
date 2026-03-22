@@ -23,6 +23,8 @@ export interface ServerGameState extends GameState {
   skipCheckCache: boolean;
   /** When true the active player cannot compile this turn (consumed once) */
   denyCompile: boolean;
+    /** Remains true for the entire turn when compile was denied, cleared in finishTurn */
+    compileDeniedThisTurn: boolean;
   /** When set, that player index can see the full opponent hand this turn */
   revealOpponentHandFor: 0 | 1 | null;
   /** When set, the specified viewer can see one specific hand card of the opponent */
@@ -56,6 +58,7 @@ export function createServerGameState(
     effectQueueContext: null,
     skipCheckCache: false,
     denyCompile: false,
+      compileDeniedThisTurn: false,
     revealOpponentHandFor: null,
     revealHandCardFor: null,
     pendingBonusPlay: null,
@@ -309,7 +312,8 @@ export function processAutoPhases(state: ServerGameState): void {
   state.turnPhase = TurnPhase.CheckCompile;
   if (state.denyCompile) {
     state.denyCompile = false;
-    state.pendingLogs.push("  deny_compile: opponent compile denied this turn");
+      state.compileDeniedThisTurn = true;
+      state.pendingLogs.push("  deny_compile: opponent compile denied this turn");
   } else {
     for (let li = 0; li < 3; li++) {
       const ownVal = lineValue(state, pi, li);
@@ -407,6 +411,7 @@ export function finishTurn(state: ServerGameState): void {
   state.pendingControlReorder = null;
   state.pendingBonusPlay = null;
   state.lastTargetedInstanceId = null;
+    state.compileDeniedThisTurn = false;
   state.activePlayerIndex = (1 - state.activePlayerIndex) as 0 | 1;
   state.turnNumber++;
   state.turnPhase = TurnPhase.Start;
@@ -430,11 +435,12 @@ export function finishTurn(state: ServerGameState): void {
 }
 
 /** Pop the next effect from the queue and execute it. */
-export function resolveNextEffect(state: ServerGameState, targetInstanceId?: string, newProtocolOrder?: string[], targetLineIndex?: number, discardInstanceId?: string): void {
+export function resolveNextEffect(state: ServerGameState, targetInstanceId?: string, newProtocolOrder?: string[], swapProtocolIds?: string[], targetLineIndex?: number, discardInstanceId?: string): void {
   const effect = state.effectQueue.shift();
   if (!effect) return;
   if (targetInstanceId !== undefined) effect.payload.targetInstanceId = targetInstanceId;
   if (newProtocolOrder !== undefined) effect.payload.newProtocolOrder = newProtocolOrder;
+  if (swapProtocolIds !== undefined) effect.payload.swapProtocolIds = swapProtocolIds;
   if (targetLineIndex !== undefined) effect.payload.targetLineIndex = targetLineIndex;
   if (discardInstanceId !== undefined) effect.payload.discardInstanceId = discardInstanceId;
   executeEffect(state, effect);
@@ -537,10 +543,13 @@ export function playCard(
   const anyLineBonusPlay = isBonusPlay && state.pendingBonusPlay!.anyLine;
   if (isBonusPlay) state.pendingBonusPlay = null;
 
-  // Face-up cards must match the line's protocol (waived for play_any_line bonus)
+  // Face-up cards must match one of the two protocols in that line
+  // (own or opponent side), waived for play_any_line bonus.
   if (face === CardFace.FaceUp && !anyLineBonusPlay) {
-    const lineProtocol = player.protocols.find((p) => p.lineIndex === lineIndex);
-    if (!lineProtocol || lineProtocol.protocolId !== def.protocolId)
+    const opponent = state.players[(1 - playerIndex) as 0 | 1];
+    const ownLineProtocol = player.protocols.find((p) => p.lineIndex === lineIndex)?.protocolId;
+    const oppLineProtocol = opponent.protocols.find((p) => p.lineIndex === lineIndex)?.protocolId;
+    if (def.protocolId !== ownLineProtocol && def.protocolId !== oppLineProtocol)
       return { success: false, reason: "Card protocol does not match this line." };
   }
 
@@ -620,6 +629,8 @@ export function resolveControlReorder(
         const proto = protocols.find((p) => p.protocolId === newProtocolOrder[i]);
         if (proto) proto.lineIndex = i as 0 | 1 | 2;
       }
+      // Keep array order aligned with line positions for all index-based consumers.
+      protocols.sort((a, b) => a.lineIndex - b.lineIndex);
       state.pendingLogs.push(`  control_reorder: P${playerIndex} reordered ${whose} protocols [${newProtocolOrder.join(", ")}]`);
     }
   } else {

@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { DraftState, DraftVariant, ProtocolSet } from "@compile/shared";
 import { getSocket } from "../network/SocketClient";
-import { PROTOCOL_COLORS } from "../data/cardDefs";
+import { PROTOCOL_ACCENT_COLORS, PROTOCOL_COLORS } from "../data/cardDefs";
 
 interface DraftSceneData {
   draftState: DraftState;
@@ -180,8 +180,12 @@ export class DraftScene extends Phaser.Scene {
     const availableIds = new Set(state.availableProtocols.map((p) => p.id));
     const pickedIds = new Set(state.picks.map((p) => p.protocolId));
     const cardCount = this.draftPool.length;
-    const gridLeft = 20;
-    const gridRight = width - 20;
+    const forceThreeByThree =
+      state.lobbySettings.draftVariant === DraftVariant.Limited9 && cardCount === 9;
+    // For Limited9's fixed 3x3, reserve extra west/east breathing room.
+    const sideInset = forceThreeByThree ? Math.max(64, Math.floor(width * 0.12)) : 20;
+    const gridLeft = sideInset;
+    const gridRight = width - sideInset;
     const gridTop = L.cardsTop;
     const gridBottom = L.summaryY - L.summaryH / 2 - 10;
     const gridW = Math.max(1, gridRight - gridLeft);
@@ -199,26 +203,45 @@ export class DraftScene extends Phaser.Scene {
       gapY: minGapY,
     };
 
-    const minCols = cardCount <= 6 ? 3 : 4;
-    const maxCols = Math.max(minCols, Math.min(cardCount || 1, 8));
-    for (let cols = minCols; cols <= maxCols; cols++) {
-      const rows = Math.max(1, Math.ceil((cardCount || 1) / cols));
+    if (forceThreeByThree) {
+      const cols = 3;
+      const rows = 3;
       const slotW = (gridW - (cols - 1) * minGapX) / cols;
       const slotH = (gridH - (rows - 1) * minGapY) / rows;
-      if (slotW <= 0 || slotH <= 0) continue;
-
       const cardW = Math.min(slotW, slotH / targetAspect);
       const cardH = cardW * targetAspect;
-      const score = cardW;
-      if (score > best.cardW) {
-        best = {
-          cols,
-          rows,
-          cardW,
-          cardH,
-          gapX: cols > 1 ? (gridW - cols * cardW) / (cols - 1) : 0,
-          gapY: rows > 1 ? (gridH - rows * cardH) / (rows - 1) : 0,
-        };
+      best = {
+        cols,
+        rows,
+        cardW,
+        cardH,
+        gapX: cols > 1 ? (gridW - cols * cardW) / (cols - 1) : 0,
+        gapY: rows > 1 ? (gridH - rows * cardH) / (rows - 1) : 0,
+      };
+    }
+
+    if (!forceThreeByThree) {
+      const minCols = cardCount <= 6 ? 3 : 4;
+      const maxCols = Math.max(minCols, Math.min(cardCount || 1, 8));
+      for (let cols = minCols; cols <= maxCols; cols++) {
+        const rows = Math.max(1, Math.ceil((cardCount || 1) / cols));
+        const slotW = (gridW - (cols - 1) * minGapX) / cols;
+        const slotH = (gridH - (rows - 1) * minGapY) / rows;
+        if (slotW <= 0 || slotH <= 0) continue;
+
+        const cardW = Math.min(slotW, slotH / targetAspect);
+        const cardH = cardW * targetAspect;
+        const score = cardW;
+        if (score > best.cardW) {
+          best = {
+            cols,
+            rows,
+            cardW,
+            cardH,
+            gapX: cols > 1 ? (gridW - cols * cardW) / (cols - 1) : 0,
+            gapY: rows > 1 ? (gridH - rows * cardH) / (rows - 1) : 0,
+          };
+        }
       }
     }
 
@@ -236,51 +259,63 @@ export class DraftScene extends Phaser.Scene {
       const isAvailable = availableIds.has(proto.id);
       const isDrafted = pickedIds.has(proto.id);
 
-      const protoColor = PROTOCOL_COLORS.get(proto.id) ?? 0x1a3a5c;
-      const fillNormal = isDrafted
-        ? 0x3e434a
-        : isMyTurn
-          ? DraftScene.shadeColor(protoColor, 1.0)
-          : DraftScene.shadeColor(protoColor, 0.72);
-      const fillHover = DraftScene.shadeColor(protoColor, 1.25);
-      const strokeNormal = isDrafted ? 0x6b7380 : DraftScene.shadeColor(protoColor, 1.45);
-      const titleColor = DraftScene.textColorForBg(fillNormal);
-      const descColor = isDrafted ? "#c8d0da" : (isMyTurn ? "#e4f0ff" : "#b8c9df");
+      const protoBody   = PROTOCOL_COLORS.get(proto.id) ?? 0x1a3a5c;
+      const protoAccent = PROTOCOL_ACCENT_COLORS.get(proto.id) ?? 0x4488cc;
+      const dimFactor = isDrafted ? 0.45 : (isMyTurn ? 1.0 : 0.72);
+      const fillBody   = isDrafted ? 0x3e434a : DraftScene.shadeColor(protoBody,   dimFactor);
+      const fillAccent = isDrafted ? 0x555a60 : DraftScene.shadeColor(protoAccent, dimFactor);
+      const fillBodyH   = DraftScene.shadeColor(protoBody,   1.25);
+      const fillAccentH = DraftScene.shadeColor(protoAccent, 1.25);
+      const strokeNormal = isDrafted ? 0x6b7380 : DraftScene.shadeColor(protoAccent, 1.5);
 
-      const bg = this.add.rectangle(0, 0, best.cardW, best.cardH, fillNormal)
+      // Two-tone split: north half = accent, south half = body
+      const halfH = best.cardH / 2;
+      const northBg = this.add.rectangle(0, -halfH / 2, best.cardW, halfH, fillAccent);
+      const southBg = this.add.rectangle(0,  halfH / 2, best.cardW, halfH, fillBody);
+      // Border drawn as transparent overlay so it sits above both halves
+      const border = this.add.rectangle(0, 0, best.cardW, best.cardH, 0x000000, 0)
         .setStrokeStyle(2, strokeNormal);
-      const nameT = this.add.text(0, -best.cardH * 0.28, proto.name, {
-        fontSize: `${Math.max(11, Math.floor(best.cardW * 0.082))}px`,
+
+      const nameFontSize = Math.max(11, Math.floor(best.cardW * 0.082));
+      const descFontSize = Math.max(8,  Math.floor(best.cardW * 0.047));
+      const nameT = this.add.text(0, -best.cardH / 4, proto.name, {
+        fontSize: `${nameFontSize}px`,
         fontFamily: "monospace",
-        color: titleColor,
+        color: "#ffffff",
         fontStyle: "bold",
+        stroke: "#000000",
+        strokeThickness: Math.max(2, Math.floor(nameFontSize * 0.18)),
       }).setOrigin(0.5);
-      const descT = this.add.text(0, best.cardH * 0.06, proto.description, {
-        fontSize: `${Math.max(8, Math.floor(best.cardW * 0.047))}px`,
+      const descT = this.add.text(0, best.cardH / 4, proto.description, {
+        fontSize: `${descFontSize}px`,
         fontFamily: "monospace",
-        color: descColor,
+        color: isDrafted ? "#c8d0da" : "#e4f0ff",
         wordWrap: { width: best.cardW - 14 },
         align: "center",
+        stroke: "#000000",
+        strokeThickness: Math.max(1, Math.floor(descFontSize * 0.18)),
       }).setOrigin(0.5);
 
-      const container = this.add.container(x, y, [bg, nameT, descT]);
+      const container = this.add.container(x, y, [northBg, southBg, border, nameT, descT]);
       if (isDrafted) {
         container.setScale(0.5);
       }
       this.dynamicGroup.add(container, true);
 
       if (isMyTurn && isAvailable && !isDrafted) {
-        bg.setInteractive({ useHandCursor: true });
-        bg.on("pointerover", () => {
-          bg.setFillStyle(fillHover);
-          bg.setStrokeStyle(2, 0x00ffcc);
+        border.setInteractive({ useHandCursor: true });
+        border.on("pointerover", () => {
+          northBg.setFillStyle(fillAccentH);
+          southBg.setFillStyle(fillBodyH);
+          border.setStrokeStyle(2, 0x00ffcc);
         });
-        bg.on("pointerout", () => {
-          bg.setFillStyle(fillNormal);
-          bg.setStrokeStyle(2, strokeNormal);
+        border.on("pointerout", () => {
+          northBg.setFillStyle(fillAccent);
+          southBg.setFillStyle(fillBody);
+          border.setStrokeStyle(2, strokeNormal);
         });
-        bg.on("pointerdown", () => {
-          bg.disableInteractive();
+        border.on("pointerdown", () => {
+          border.disableInteractive();
           getSocket().emit("draft_pick", { protocolId: proto.id });
         });
       }

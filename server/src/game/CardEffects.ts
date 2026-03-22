@@ -437,6 +437,8 @@ export function executeEffect(
         const proto = protocols.find((p) => p.protocolId === newOrder[i]);
         if (proto) proto.lineIndex = i as 0 | 1 | 2;
       }
+      // Keep array order aligned with line positions for all index-based consumers.
+      protocols.sort((a, b) => a.lineIndex - b.lineIndex);
       log(`rearrange_protocols ${whose}: [${newOrder.join(", ")}]`);
       break;
     }
@@ -785,38 +787,35 @@ export function executeEffect(
         break;
       }
 
-      // Auto: delete all value-1/2 cards in a chosen line
+      // Auto: delete all value-1/2 cards in a chosen line (both sides)
       if (targets === "line_values_1_2") {
         if (targetLineIndex === undefined) {
           log("delete line_values_1_2: no targetLineIndex provided");
           break;
         }
-        let lineOwner = -1;
-        let lineRef: { cards: CardInstance[] } | null = null;
-        for (let pi = 0; pi < 2; pi++) {
-          if (targetLineIndex >= 0 && targetLineIndex <= 2) {
-            lineOwner = pi;
-            lineRef = state.players[pi].lines[targetLineIndex];
-            break;
+        const li = targetLineIndex;
+        if (li < 0 || li > 2) {
+          log(`delete line_values_1_2: invalid lineIndex ${li}`);
+          break;
+        }
+        let totalDeleted = 0;
+        for (const lpi of [0, 1]) {
+          const targetLine = state.players[lpi].lines[li];
+          const toDelete = targetLine.cards.filter((c) => {
+            const def = CARD_MAP.get(c.defId);
+            const val = c.face === CardFace.FaceDown ? 2 : (def?.value ?? 0);
+            return val === 1 || val === 2;
+          });
+          for (const c of toDelete) {
+            const idx = targetLine.cards.indexOf(c);
+            targetLine.cards.splice(idx, 1);
+            state.trashes[lpi].push(c);
           }
+          state.players[lpi].trashSize = state.trashes[lpi].length;
+          totalDeleted += toDelete.length;
         }
-        // targetLineIndex encodes player+line: 0-2 = own, 3-5 = opponent
-        const li = targetLineIndex % 3;
-        const lpi = targetLineIndex < 3 ? ownerIndex : oi;
-        const targetLine = state.players[lpi].lines[li];
-        const toDelete = targetLine.cards.filter((c) => {
-          const def = CARD_MAP.get(c.defId);
-          const val = c.face === CardFace.FaceDown ? 2 : (def?.value ?? 0);
-          return val === 1 || val === 2;
-        });
-        for (const c of toDelete) {
-          const idx = targetLine.cards.indexOf(c);
-          targetLine.cards.splice(idx, 1);
-          state.trashes[lpi].push(c);
-        }
-        state.players[lpi].trashSize = state.trashes[lpi].length;
-        log(`delete line_values_1_2: removed ${toDelete.length} card(s) from line ${li}`);
-        if (toDelete.length > 0) {
+        log(`delete line_values_1_2: removed ${totalDeleted} card(s) from both sides of line ${li}`);
+        if (totalDeleted > 0) {
           for (const { card, amount: drawAmt } of scanPassives(state, ownerIndex, "after_delete_draw")) {
             log(`after_delete_draw (${card.defId}): drawing ${drawAmt}`);
             drawCards(state, ownerIndex, drawAmt);
@@ -825,23 +824,32 @@ export function executeEffect(
         break;
       }
 
-      // Auto: delete all cards in a chosen line if it has 8+ cards
+      // Auto: delete all cards in a chosen line if it has 8+ cards (both sides)
       if (targets === "line_8plus_cards") {
         if (targetLineIndex === undefined) {
           log("delete line_8plus_cards: no targetLineIndex provided");
           break;
         }
-        const li = targetLineIndex % 3;
-        const lpi = targetLineIndex < 3 ? ownerIndex : oi;
-        const targetLine = state.players[lpi].lines[li];
-        if (targetLine.cards.length < 8) {
-          log(`delete line_8plus_cards: line ${li} has only ${targetLine.cards.length} cards`);
+        const li = targetLineIndex;
+        if (li < 0 || li > 2) {
+          log(`delete line_8plus_cards: invalid lineIndex ${li}`);
           break;
         }
-        const removed = targetLine.cards.splice(0);
-        state.trashes[lpi].push(...removed);
-        state.players[lpi].trashSize = state.trashes[lpi].length;
-        log(`delete line_8plus_cards: cleared ${removed.length} cards from line ${li}`);
+        // Count total cards across both sides of the line
+        const totalCards = state.players[0].lines[li].cards.length + state.players[1].lines[li].cards.length;
+        if (totalCards < 8) {
+          log(`delete line_8plus_cards: line ${li} has only ${totalCards} total cards`);
+          break;
+        }
+        let totalRemoved = 0;
+        for (const lpi of [0, 1]) {
+          const targetLine = state.players[lpi].lines[li];
+          const removed = targetLine.cards.splice(0);
+          state.trashes[lpi].push(...removed);
+          state.players[lpi].trashSize = state.trashes[lpi].length;
+          totalRemoved += removed.length;
+        }
+        log(`delete line_8plus_cards: cleared ${totalRemoved} cards from both sides of line ${li}`);
         for (const { card, amount: drawAmt } of scanPassives(state, ownerIndex, "after_delete_draw")) {
           log(`after_delete_draw (${card.defId}): drawing ${drawAmt}`);
           drawCards(state, ownerIndex, drawAmt);
@@ -1175,48 +1183,44 @@ export function executeEffect(
       const tmp = protoA.lineIndex;
       protoA.lineIndex = protoB.lineIndex;
       protoB.lineIndex = tmp;
+      // Keep array order aligned with line positions for all index-based consumers.
+      state.players[ownerIndex].protocols.sort((a, b) => a.lineIndex - b.lineIndex);
       log(`swap_protocols: swapped ${protoA.protocolId} (line ${protoB.lineIndex}) and ${protoB.protocolId} (line ${protoA.lineIndex})`);
       break;
     }
 
     case "discard_to_delete2": {
-      // Discard 3 hand cards, then delete 2 cards from any lines.
-      const discardIds = payload.discardIds as string[] | undefined;
-      const deleteIds = payload.deleteTargetIds as string[] | undefined;
-      if (!discardIds || discardIds.length === 0) {
-        log("discard_to_delete2: skipped (no cards to discard)");
-        break;
+      // Queue: player chooses which cards to discard (up to 3, or all if fewer),
+      // then gets 2 delete-any-card sub-effects.
+      const discardCount = (payload.discard as number) ?? 3;
+      const toDiscard = Math.min(discardCount, state.players[ownerIndex].hand.length);
+      for (let i = 0; i < toDiscard; i++) {
+        state.effectQueue.push({
+          id: uuidv4(),
+          cardDefId,
+          cardName: effect.cardName,
+          type: "discard",
+          description: "Choose a card to discard.",
+          ownerIndex,
+          trigger: effect.trigger,
+          payload: {},
+          sourceInstanceId,
+        });
       }
-      const ownHand = state.players[ownerIndex].hand;
-      for (const id of discardIds) {
-        const idx = ownHand.findIndex((c) => c.instanceId === id);
-        if (idx !== -1) {
-          const [d] = ownHand.splice(idx, 1);
-          d.face = CardFace.FaceUp;
-          state.trashes[ownerIndex].push(d);
-        }
+      for (let i = 0; i < 2; i++) {
+        state.effectQueue.push({
+          id: uuidv4(),
+          cardDefId,
+          cardName: effect.cardName,
+          type: "delete",
+          description: "Delete 1 card.",
+          ownerIndex,
+          trigger: effect.trigger,
+          payload: { targets: "any_card" },
+          sourceInstanceId,
+        });
       }
-      state.players[ownerIndex].trashSize = state.trashes[ownerIndex].length;
-      log(`discard_to_delete2: discarded ${discardIds.length} card(s)`);
-      if (deleteIds) {
-        for (const id of deleteIds) {
-          let found = false;
-          outer: for (let pi = 0; pi < 2; pi++) {
-            for (const line of state.players[pi].lines) {
-              const idx = line.cards.findIndex((c) => c.instanceId === id);
-              if (idx !== -1) {
-                const [t] = line.cards.splice(idx, 1);
-                state.trashes[pi].push(t);
-                state.players[pi].trashSize = state.trashes[pi].length;
-                log(`discard_to_delete2: deleted ${t.defId}`);
-                found = true;
-                break outer;
-              }
-            }
-          }
-          if (!found) log(`discard_to_delete2: delete target ${id} not found`);
-        }
-      }
+      log(`discard_to_delete2: queued ${toDiscard} discard(s) + 2 deletes`);
       break;
     }
 
@@ -1731,8 +1735,18 @@ export function executeEffect(
         const found = findShiftCard(targetId);
         if (!found) { log(`shift: card ${targetId} not found`); break; }
         if (found.pi !== ownerIndex) { log("shift: grv_1 may only shift own cards"); break; }
-        if (found.li !== srcLine && targetLineIndex !== srcLine) {
-          log("shift: move must be to or from source line"); break;
+        if (srcLine < 0 || srcLine > 2) { log("shift: source line not found"); break; }
+        // "Either to or from this line":
+        // - picked from source line => must move to a different own line
+        // - picked from another own line => must move to source line
+        if (found.li === srcLine) {
+          if (targetLineIndex === srcLine) {
+            log("shift: cannot target same source line when shifting from source line");
+            break;
+          }
+        } else if (targetLineIndex !== srcLine) {
+          log("shift: move must be to source line when picked card is outside source line");
+          break;
         }
         doShift(found, targetLineIndex);
         break;

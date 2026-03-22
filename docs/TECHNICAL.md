@@ -118,7 +118,7 @@ After every mutation, `broadcastState()` calls `buildPlayerView(state, i)` for e
 ### 5. Card Effects
 `CardEffects.enqueueEffectsFromCard(state, ownerIndex, cardDefId, trigger)` enqueues `PendingEffect` entries onto `state.effectQueue` for the given trigger (`"immediate"`, `"start"`, or `"end"`). Effects execute one at a time via `resolveNextEffect()` → `executeEffect()`.
 
-Effects that require a player choice set `state.phase = "EffectResolution"` and wait for the client to emit a `resolve_effect` socket event with `{ targetInstanceId?, targetLineIndex?, newProtocolOrder? }`. Non-interactive effects resolve immediately without suspending the turn.
+Effects that require a player choice set `state.phase = "EffectResolution"` and wait for the client to emit a `resolve_effect` socket event with `{ targetInstanceId?, targetLineIndex?, newProtocolOrder?, swapProtocolIds? }`. Non-interactive effects resolve immediately without suspending the turn.
 
 All 42 active effect types are fully implemented. Use `isCardCovered(state, instanceId)` to check whether a card is covered (not the topmost card in its line).
 
@@ -166,4 +166,4 @@ When adding new cards to the game:
 1. **Update `server/src/data/cards.ts`** — add/replace `CommandCardDef` entries with correct values and `CardEffect` objects.
 2. **Update `client/src/data/cardDefs.ts`** — mirror the display data (name, value, effect description text).
 3. **Extend `server/src/game/CardEffects.ts`** — add a new `case` inside `executeEffect()` for any new `effect.type` strings. For passive effects that evaluate outside the queue, wire them into the appropriate hook point (`lineValue()`, `checkPlayDenials()`, `enqueueEffectsOnCover()`, or an inline event site).
-4. If the effect requires a player to choose a target, set `state.phase = "EffectResolution"` and return early. The client emits `resolve_effect` with `targetInstanceId`, `targetLineIndex`, or `newProtocolOrder`; `continueAfterEffects()` resumes normal play once the queue is empty.
+4. If the effect requires a player to choose a target, set `state.phase = "EffectResolution"` and return early. The client emits `resolve_effect` with `targetInstanceId`, `targetLineIndex`, `newProtocolOrder`, or `swapProtocolIds`; `continueAfterEffects()` resumes normal play once the queue is empty.

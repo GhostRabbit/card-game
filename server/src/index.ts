@@ -56,10 +56,10 @@ io.on("connection", (socket) => {
     room.handleRefresh(socket);
   });
 
-  socket.on("resolve_effect", ({ id, targetInstanceId, newProtocolOrder, targetLineIndex, discardInstanceId }) => {
+  socket.on("resolve_effect", ({ id, targetInstanceId, newProtocolOrder, swapProtocolIds, targetLineIndex, discardInstanceId }) => {
     const room = roomManager.getRoom(socket.id);
     if (!room) return;
-    room.handleResolveEffect(socket, id, targetInstanceId, newProtocolOrder, targetLineIndex, discardInstanceId);
+    room.handleResolveEffect(socket, id, targetInstanceId, newProtocolOrder, swapProtocolIds, targetLineIndex, discardInstanceId);
   });
 
   socket.on("resolve_control_reorder", ({ whose, newProtocolOrder }) => {

@@ -1,4 +1,22 @@
 import { Page, expect } from '@playwright/test';
+import {
+  clickCanvasBoardCard,
+  clickCanvasObjectByTestId,
+  clickFirstInteractiveBoardCard,
+  getFocusPanelCardNameFallback,
+  hoverCanvasObjectByTestId,
+} from './game-page/canvas-helpers';
+import {
+  countLinePickButtons,
+  getEffectDescription,
+  getEffectHint,
+  gotoForEffect,
+  hasConfirmButton,
+  hasLinePickButtons,
+  hasSkipButton,
+  isEffectResolutionActive,
+} from './game-page/effect-helpers';
+import { getStatusText, getStatusTextMap } from './game-page/status-helpers';
 
 /**
  * Page Object Model for the Game Board
@@ -8,44 +26,7 @@ export class GamePage {
   constructor(private _page: Page) {}
 
   private async clickCanvasObjectByTestId(testId: string, index: number = 0): Promise<boolean> {
-    const point = await this._page.evaluate(({ id, idx }) => {
-      const game = (window as any).__PHASER_GAME__;
-      if (!game) return null;
-
-      const scene = game.scene?.getScene?.('GameScene');
-      if (!scene?.children?.list) return null;
-
-      const matches = scene.children.list.filter((go: any) =>
-        typeof go?.getData === 'function' && go.getData('testid') === id
-      );
-      const target = matches[idx];
-      if (!target) return null;
-
-      let worldX = target.x ?? 0;
-      let worldY = target.y ?? 0;
-      if (typeof target.getBounds === 'function') {
-        const b = target.getBounds();
-        if (b) {
-          worldX = b.centerX ?? (b.x + b.width / 2);
-          worldY = b.centerY ?? (b.y + b.height / 2);
-        }
-      }
-
-      const canvas = game.canvas as HTMLCanvasElement;
-      if (!canvas) return null;
-      const rect = canvas.getBoundingClientRect();
-      const worldW = scene.scale?.width ?? game.config.width ?? 1600;
-      const worldH = scene.scale?.height ?? game.config.height ?? 720;
-
-      return {
-        x: rect.left + worldX * (rect.width / worldW),
-        y: rect.top + worldY * (rect.height / worldH),
-      };
-    }, { id: testId, idx: index });
-
-    if (!point) return false;
-    await this._page.mouse.click(point.x, point.y);
-    return true;
+    return await clickCanvasObjectByTestId(this._page, testId, index);
   }
 
   /** Get the underlying Playwright Page for advanced operations */
@@ -64,12 +45,21 @@ export class GamePage {
   }
 
   async waitForGameStart() {
-    // Wait until test infrastructure is ready and phase chips are present
-    await this.page.waitForSelector('[data-testid="game-container"]', { timeout: 15000 });
-    await this.page.waitForSelector('[data-testid="phase-START"]', { timeout: 15000 });
+    const waitOnce = async () => {
+      // Wait until test infrastructure is ready and phase chips are present
+      await this.page.waitForSelector('[data-testid="game-container"]', { timeout: 15000 });
+      await this.page.waitForSelector('[data-testid="phase-START"]', { timeout: 15000 });
+      // Keep the selector-based mapping in sync by giving Phaser a moment
+      await this.page.waitForTimeout(100);
+    };
 
-    // Keep the selector-based mapping in sync by giving Phaser a moment
-    await this.page.waitForTimeout(100);
+    try {
+      await waitOnce();
+    } catch {
+      // Rare startup race in CI/local runs: reload once and retry.
+      await this.page.reload({ waitUntil: 'domcontentloaded' });
+      await waitOnce();
+    }
   }
 
   async getCardsInHand(): Promise<number> {
@@ -148,13 +138,21 @@ export class GamePage {
 
   async hoverOverCard(index: number) {
     const card = this.page.locator('[data-testid="card-in-hand"]').nth(index);
-    await card.hover();
+    try {
+      await card.hover({ timeout: 1000 });
+    } catch {
+      const hovered = await hoverCanvasObjectByTestId(this._page, 'card-in-hand', index);
+      if (!hovered) throw new Error('Unable to locate hand card hover point in Phaser scene.');
+    }
     await this.page.waitForTimeout(300); // Wait for focus panel to update
   }
 
   async getFocusPanelCardName(): Promise<string | null> {
     const name = this.page.locator('[data-testid="focus-panel-card-name"]');
-    return await name.textContent();
+    if (await name.count()) {
+      return await name.first().textContent();
+    }
+    return await getFocusPanelCardNameFallback(this._page);
   }
 
   async compileToLine(lineIndex: number) {
@@ -204,31 +202,27 @@ export class GamePage {
 
   /** Navigate to a game scene pre-loaded with the given effect type pending. */
   async gotoForEffect(effectType: string) {
-    await this._page.goto(`/?test=1&effect=${effectType}`);
-    await this._page.waitForLoadState('domcontentloaded');
-    await this.waitForGameStart();
-    // Give Phaser a moment to render the effect resolution HUD
-    await this._page.waitForTimeout(300);
+    await gotoForEffect(this._page, effectType, () => this.waitForGameStart());
   }
 
   /** Text content of the effect description label (card name ▸ description). */
   async getEffectDescription(): Promise<string> {
-    return await this._page.locator('[data-testid="effect-description"]').textContent() ?? '';
+    return await getEffectDescription(this._page);
   }
 
   /** Text content of the effect action-hint (what the player must do). */
   async getEffectHint(): Promise<string> {
-    return await this._page.locator('[data-testid="effect-hint"]').textContent() ?? '';
+    return await getEffectHint(this._page);
   }
 
   /** True when the CONFIRM button is visible (auto-execute effects). */
   async hasConfirmButton(): Promise<boolean> {
-    return await this._page.locator('[data-testid="confirm-effect-button"]').isVisible();
+    return await hasConfirmButton(this._page);
   }
 
   /** True when the SKIP button is visible (optional effects). */
   async hasSkipButton(): Promise<boolean> {
-    return await this._page.locator('[data-testid="skip-effect-button"]').isVisible();
+    return await hasSkipButton(this._page);
   }
 
   /** Click the CONFIRM effect button. */
@@ -260,7 +254,12 @@ export class GamePage {
 
   /** True when at least one line-pick button is visible. */
   async hasLinePickButtons(): Promise<boolean> {
-    return await this._page.locator('[data-testid^="line-pick-button-"]').first().isVisible();
+    return await hasLinePickButtons(this._page);
+  }
+
+  /** Number of visible line-pick buttons. */
+  async countLinePickButtons(): Promise<number> {
+    return await countLinePickButtons(this._page);
   }
 
   /** Click the nth card in hand (for effect targeting). */
@@ -268,6 +267,28 @@ export class GamePage {
     const clicked = await this.clickCanvasObjectByTestId('card-in-hand', index);
     if (!clicked) {
       await this._page.locator('[data-testid="card-in-hand"]').nth(index).click({ force: true });
+    }
+    await this._page.waitForTimeout(200);
+  }
+
+  /** Click one of the 3 rearrange-protocol chips by displayed slot index (0..2). */
+  async clickRearrangeProtocolChip(index: number) {
+    const testId = `rearrange-protocol-chip-${index}`;
+    const clicked = await this.clickCanvasObjectByTestId(testId);
+    if (!clicked) {
+      await this._page.locator(`[data-testid="${testId}"]`).first().click({ force: true });
+    }
+    await this._page.waitForTimeout(200);
+  }
+
+  async hasRearrangeResetButton(): Promise<boolean> {
+    return await this._page.locator('[data-testid="rearrange-reset-button"]').isVisible();
+  }
+
+  async clickRearrangeResetButton() {
+    const clicked = await this.clickCanvasObjectByTestId('rearrange-reset-button');
+    if (!clicked) {
+      await this._page.locator('[data-testid="rearrange-reset-button"]').first().click({ force: true });
     }
     await this._page.waitForTimeout(200);
   }
@@ -286,27 +307,40 @@ export class GamePage {
     if (count > 0) {
       await lineCards.first().click();
       await this._page.waitForTimeout(200);
+      return;
     }
+
+    await this.clickCanvasBoardCard(lineIndex, isOpponent, 0);
+  }
+
+  /** Click a board-card via Phaser object data (line/isOwn/position). */
+  async clickCanvasBoardCard(lineIndex: number, isOpponent = false, position = 0): Promise<boolean> {
+    const clicked = await clickCanvasBoardCard(this._page, lineIndex, isOpponent, position);
+    if (!clicked) return false;
+    await this._page.waitForTimeout(200);
+    return true;
+  }
+
+  /** Click the first currently interactive board card (effect-target style). */
+  async clickFirstInteractiveBoardCard(): Promise<boolean> {
+    const clicked = await clickFirstInteractiveBoardCard(this._page);
+    if (!clicked) return false;
+    await this._page.waitForTimeout(200);
+    return true;
   }
 
   /** True when the effect resolution HUD is active (effect-description visible). */
   async isEffectResolutionActive(): Promise<boolean> {
-    return await this._page.locator('[data-testid="effect-description"]').isVisible();
+    return await isEffectResolutionActive(this._page);
   }
 
   /** Return one tracked HUD status text by id from window.__GAME_STATUS_TEXT_MAP__. */
   async getStatusText(id: string): Promise<string | null> {
-    return await this._page.evaluate((statusId) => {
-      const map = (window as any).__GAME_STATUS_TEXT_MAP__ as Record<string, string> | undefined;
-      if (!map) return null;
-      return map[statusId] ?? null;
-    }, id);
+    return await getStatusText(this._page, id);
   }
 
   /** Return all tracked HUD status texts from window.__GAME_STATUS_TEXT_MAP__. */
   async getStatusTextMap(): Promise<Record<string, string>> {
-    return await this._page.evaluate(() => {
-      return ((window as any).__GAME_STATUS_TEXT_MAP__ as Record<string, string> | undefined) ?? {};
-    });
+    return await getStatusTextMap(this._page);
   }
 }

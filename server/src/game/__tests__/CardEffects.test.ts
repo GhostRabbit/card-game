@@ -2323,29 +2323,43 @@ describe("executeEffect — swap_protocols", () => {
 // ─── executeEffect: discard_to_delete2 ───────────────────────────────────────
 
 describe("executeEffect — discard_to_delete2", () => {
-  it("discards chosen cards and deletes chosen targets", () => {
+  it("queues 3 discard sub-effects + 2 delete sub-effects when hand has 3+ cards", () => {
     const state = makeState();
     state.players[0].hand.push(card("h1"), card("h2"), card("h3"));
-    state.players[1].lines[0].cards.push(card("t1", CardFace.FaceUp), card("t2", CardFace.FaceUp));
 
-    executeEffect(state, effect("discard_to_delete2", 0, {
-      discardIds: ["h1", "h2", "h3"],
-      deleteTargetIds: ["t1", "t2"],
-    }));
+    executeEffect(state, effect("discard_to_delete2", 0, { discard: 3 }));
 
-    expect(state.players[0].hand).toHaveLength(0);
-    expect(state.trashes[0]).toHaveLength(3);
-    expect(state.players[1].lines[0].cards).toHaveLength(0);
-    expect(state.trashes[1]).toHaveLength(2);
+    const discardEffects = state.effectQueue.filter(e => e.type === "discard" && e.ownerIndex === 0);
+    const deleteEffects  = state.effectQueue.filter(e => e.type === "delete" && e.ownerIndex === 0);
+    expect(discardEffects).toHaveLength(3);
+    expect(deleteEffects).toHaveLength(2);
+    expect(deleteEffects[0].payload.targets).toBe("any_card");
+    // Cards not yet removed
+    expect(state.players[0].hand).toHaveLength(3);
   });
 
-  it("skips when no discardIds provided", () => {
+  it("queues only as many discards as cards in hand when hand has fewer than 3", () => {
     const state = makeState();
-    state.players[1].lines[0].cards.push(card("t1", CardFace.FaceUp));
+    state.players[0].hand.push(card("h1"));
 
-    executeEffect(state, effect("discard_to_delete2", 0, { deleteTargetIds: ["t1"] }));
+    executeEffect(state, effect("discard_to_delete2", 0, { discard: 3 }));
 
-    expect(state.players[1].lines[0].cards).toHaveLength(1);
+    const discardEffects = state.effectQueue.filter(e => e.type === "discard" && e.ownerIndex === 0);
+    const deleteEffects  = state.effectQueue.filter(e => e.type === "delete" && e.ownerIndex === 0);
+    expect(discardEffects).toHaveLength(1);
+    expect(deleteEffects).toHaveLength(2);
+  });
+
+  it("still queues 2 delete sub-effects even when hand is empty", () => {
+    const state = makeState();
+    // hand is empty
+
+    executeEffect(state, effect("discard_to_delete2", 0, { discard: 3 }));
+
+    const discardEffects = state.effectQueue.filter(e => e.type === "discard" && e.ownerIndex === 0);
+    const deleteEffects  = state.effectQueue.filter(e => e.type === "delete" && e.ownerIndex === 0);
+    expect(discardEffects).toHaveLength(0);
+    expect(deleteEffects).toHaveLength(2);
   });
 });
 
@@ -3020,6 +3034,56 @@ describe("playCard — deny_faceup (psy_1)", () => {
     ];
     const result = playCard(state, 0, "hand0", CardFace.FaceUp, 0);
     expect(result.success).toBe(true);
+  });
+});
+
+describe("playCard — face-up protocol match uses both line protocols", () => {
+  it("allows face-up play when the card matches the opponent protocol in that line", () => {
+    const state = makeState();
+    state.activePlayerIndex = 0;
+    state.turnPhase = "Action" as any;
+
+    state.players[0].protocols = [
+      { protocolId: "proto_spd", status: "Loading" as any, lineIndex: 0 },
+      { protocolId: "proto_spd", status: "Loading" as any, lineIndex: 1 },
+      { protocolId: "proto_spd", status: "Loading" as any, lineIndex: 2 },
+    ];
+    state.players[1].protocols = [
+      { protocolId: "proto_drk", status: "Loading" as any, lineIndex: 0 },
+      { protocolId: "proto_hat", status: "Loading" as any, lineIndex: 1 },
+      { protocolId: "proto_lgt", status: "Loading" as any, lineIndex: 2 },
+    ];
+
+    state.players[0].hand = [{ instanceId: "hand0", defId: "drk_3", face: CardFace.FaceUp }];
+
+    const result = playCard(state, 0, "hand0", CardFace.FaceUp, 0);
+    expect(result.success).toBe(true);
+    expect(state.players[0].lines[0].cards.some((c) => c.instanceId === "hand0")).toBe(true);
+    expect(state.players[1].lines[0].cards.some((c) => c.instanceId === "hand0")).toBe(false);
+  });
+
+  it("rejects face-up play when the card matches neither protocol in that line", () => {
+    const state = makeState();
+    state.activePlayerIndex = 0;
+    state.turnPhase = "Action" as any;
+
+    state.players[0].protocols = [
+      { protocolId: "proto_spd", status: "Loading" as any, lineIndex: 0 },
+      { protocolId: "proto_spd", status: "Loading" as any, lineIndex: 1 },
+      { protocolId: "proto_spd", status: "Loading" as any, lineIndex: 2 },
+    ];
+    state.players[1].protocols = [
+      { protocolId: "proto_drk", status: "Loading" as any, lineIndex: 0 },
+      { protocolId: "proto_hat", status: "Loading" as any, lineIndex: 1 },
+      { protocolId: "proto_lgt", status: "Loading" as any, lineIndex: 2 },
+    ];
+
+    state.players[0].hand = [{ instanceId: "hand0", defId: "lif_3", face: CardFace.FaceUp }];
+
+    const result = playCard(state, 0, "hand0", CardFace.FaceUp, 0);
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/protocol does not match this line/i);
+    expect(state.players[0].lines[0].cards).toHaveLength(0);
   });
 });
 

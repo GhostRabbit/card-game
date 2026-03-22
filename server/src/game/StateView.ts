@@ -67,6 +67,7 @@ export function buildPlayerView(
     pendingControlReorder: state.pendingControlReorder === playerIndex,
     lineValues: [lineValue(state, playerIndex, 0), lineValue(state, playerIndex, 1), lineValue(state, playerIndex, 2)],
     opponentLineValues: [lineValue(state, oi, 0), lineValue(state, oi, 1), lineValue(state, oi, 2)],
+      compileDeniedThisTurn: state.compileDeniedThisTurn && state.activePlayerIndex === playerIndex,
   };
 
   return { view, turnPhase: state.turnPhase };

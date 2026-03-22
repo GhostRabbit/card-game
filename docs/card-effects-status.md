@@ -11,9 +11,9 @@ Sign-off column: mark `[x]` when you're happy with the current behaviour.
 
 ---
 
-## Passive effects (never triggered by resolveEffects — future system)
+## Passive effects (evaluated outside resolveEffects)
 
-All `trigger: "passive"` effects are declared on cards but are **never called** by the current game loop. They need a separate passive-evaluation pass (e.g. on line value calculation, on-cover hooks, etc.).
+`trigger: "passive"` effects are **not handled by the queued `resolveEffects` path**. They are evaluated via hook points in the current game loop (e.g. line value calculation, play-denial checks, and on-cover/after-event hooks).
 
 | Effect type | Cards | Meaning | Sign-off |
 |---|---|---|---|

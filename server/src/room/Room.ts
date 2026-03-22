@@ -303,7 +303,7 @@ export class Room {
     this.broadcastState();
   }
 
-  handleResolveEffect(socket: AppSocket, effectId: string, targetInstanceId?: string, newProtocolOrder?: string[], targetLineIndex?: number, discardInstanceId?: string): void {
+  handleResolveEffect(socket: AppSocket, effectId: string, targetInstanceId?: string, newProtocolOrder?: string[], swapProtocolIds?: string[], targetLineIndex?: number, discardInstanceId?: string): void {
     if (!this.gameState) return;
     const slot = this.players.find((p) => p?.socket.id === socket.id);
     if (!slot) return;
@@ -334,8 +334,8 @@ export class Room {
       }
     }
 
-    this.logger?.log("EFFECT", `P${slot.index} confirmed [${next.trigger}] ${next.type} from ${next.cardDefId}${targetInstanceId ? ` target=${targetInstanceId}` : ""}${discardInstanceId ? ` discard=${discardInstanceId}` : ""}${newProtocolOrder ? ` order=[${newProtocolOrder.join(",")}]` : ""}`);
-    resolveNextEffect(state, targetInstanceId, newProtocolOrder, targetLineIndex, discardInstanceId);
+    this.logger?.log("EFFECT", `P${slot.index} confirmed [${next.trigger}] ${next.type} from ${next.cardDefId}${targetInstanceId ? ` target=${targetInstanceId}` : ""}${discardInstanceId ? ` discard=${discardInstanceId}` : ""}${newProtocolOrder ? ` order=[${newProtocolOrder.join(",")}]` : ""}${swapProtocolIds ? ` swap=[${swapProtocolIds.join(",")}]` : ""}`);
+    resolveNextEffect(state, targetInstanceId, newProtocolOrder, swapProtocolIds, targetLineIndex, discardInstanceId);
     this.flushEffectLogs();
 
     if (state.effectQueue.length > 0) {

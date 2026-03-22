@@ -138,6 +138,8 @@ export interface PlayerView extends Omit<PlayerState, "hand"> {
   lineValues: [number, number, number];
   /** Server-computed line values (opponent lines, after passive modifiers) */
   opponentLineValues: [number, number, number];
+    /** True during the turn when this player's compile was denied by an opponent effect */
+    compileDeniedThisTurn: boolean;
 }
 
 /** A single effect waiting for a player to confirm before it executes. */
@@ -204,7 +206,7 @@ export interface ClientToServerEvents {
     lineIndex: number;
   }) => void;
   compile_line: (payload: { lineIndex: number }) => void;
-  resolve_effect: (payload: { id: string; targetInstanceId?: string; newProtocolOrder?: string[]; targetLineIndex?: number; discardInstanceId?: string }) => void;
+  resolve_effect: (payload: { id: string; targetInstanceId?: string; newProtocolOrder?: string[]; swapProtocolIds?: string[]; targetLineIndex?: number; discardInstanceId?: string }) => void;
   refresh: () => void;
   resolve_control_reorder: (payload: { whose?: "self" | "opponent"; newProtocolOrder?: string[] }) => void;
 }

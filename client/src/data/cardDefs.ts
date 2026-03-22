@@ -131,27 +131,56 @@ export const CARD_DEFS_CLIENT = new Map<string, ClientCardDef>(
 
 /** Hex fill colour for the name bar of each protocol's cards. */
 export const PROTOCOL_COLORS = new Map<string, number>([
-  ["proto_apy", 0x484858],  // Apathy    — muted grey-purple
-  ["proto_drk", 0x2d1050],  // Darkness  — deep purple
-  ["proto_dth", 0x4a0e0e],  // Death     — dark crimson
-  ["proto_fir", 0x6a2200],  // Fire      — burnt orange
-  ["proto_grv", 0x3a2810],  // Gravity   — earthy brown
-  ["proto_hat", 0x5a0a2a],  // Hate      — dark magenta
-  ["proto_lif", 0x0e4a20],  // Life      — forest green
-  ["proto_lgt", 0x483800],  // Light     — dark amber
-  ["proto_lov", 0x5a1040],  // Love      — dark rose
-  ["proto_mtl", 0x1e3040],  // Metal     — steel blue
-  ["proto_plg", 0x2a4800],  // Plague    — dark olive
-  ["proto_psy", 0x35086a],  // Psychic   — dark violet
-  ["proto_spd", 0x004848],  // Speed     — dark teal
-  ["proto_spr", 0x1a0a5a],  // Spirit    — dark indigo
-  ["proto_wtr", 0x0a2060],  // Water     — dark azure
+  ["proto_apy", 0x3a3a44],  // Apathy    — flat grey-lavender (lifeless, no hue)
+  ["proto_drk", 0x140828],  // Darkness  — void black-purple (near-black)
+  ["proto_dth", 0x500808],  // Death     — deep blood crimson
+  ["proto_fir", 0x6a1800],  // Fire      — burnt orange-red
+  ["proto_grv", 0x2a1808],  // Gravity   — dark earth brown
+  ["proto_hat", 0x580820],  // Hate      — dark hot crimson
+  ["proto_lif", 0x084a1a],  // Life      — rich forest green
+  ["proto_lgt", 0x483e00],  // Light     — dark golden amber
+  ["proto_lov", 0x500c38],  // Love      — deep cerise
+  ["proto_mtl", 0x1a2c3a],  // Metal     — cool steel blue-grey
+  ["proto_plg", 0x1e3a00],  // Plague    — sickly dark olive
+  ["proto_psy", 0x160878],  // Psychic   — deep blue-violet
+  ["proto_spd", 0x004838],  // Speed     — dark emerald-teal
+  ["proto_spr", 0x3c0260],  // Spirit    — vivid magenta-purple (ethereal, ~290° hue)
+  ["proto_wtr", 0x061850],  // Water     — deep ocean navy (~225° hue, 65° from Spirit)
+]);
+
+/**
+ * Bright accent colours for the card name bar — vivid and thematically distinct.
+ * Each accent is designed to pop against the dark body (PROTOCOL_COLORS),
+ * giving every protocol a unique visual identity regardless of hue proximity.
+ */
+export const PROTOCOL_ACCENT_COLORS = new Map<string, number>([
+  ["proto_apy", 0x8899aa],  // Apathy    — washed steel grey (desaturated, lifeless)
+  ["proto_drk", 0x4422cc],  // Darkness  — deep indigo glow (cold void)
+  ["proto_dth", 0xddd8bb],  // Death     — pale bone ivory
+  ["proto_fir", 0xff6600],  // Fire      — bright orange flame
+  ["proto_grv", 0xccaa44],  // Gravity   — tarnished gold (cosmic weight)
+  ["proto_hat", 0xff0044],  // Hate      — vivid rage-red
+  ["proto_lif", 0x22dd55],  // Life      — spring green
+  ["proto_lgt", 0xffee00],  // Light     — bright sun yellow
+  ["proto_lov", 0xff44cc],  // Love      — hot fuchsia-pink
+  ["proto_mtl", 0xbbbbcc],  // Metal     — brushed steel (pale neutral grey)
+  ["proto_plg", 0xaadd00],  // Plague    — sickly lime (pus-yellow-green)
+  ["proto_psy", 0x00ccff],  // Psychic   — electric cyan
+  ["proto_spd", 0x00ff99],  // Speed     — phosphor teal-green
+  ["proto_spr", 0xdd99ff],  // Spirit    — ghost lavender
+  ["proto_wtr", 0x3399ff],  // Water     — clear ocean blue
 ]);
 
 /** Returns the protocol hex colour for a card def id like "spd_3". */
 export function protocolColorFromDefId(defId: string): number {
   const prefix = defId.split("_")[0];
   return PROTOCOL_COLORS.get(`proto_${prefix}`) ?? 0x1a3a5c;
+}
+
+/** Returns the bright accent colour for the name bar for a card def id like "spd_3". */
+export function protocolAccentFromDefId(defId: string): number {
+  const prefix = defId.split("_")[0];
+  return PROTOCOL_ACCENT_COLORS.get(`proto_${prefix}`) ?? 0x4488cc;
 }
 
 export const PROTOCOL_NAMES_CLIENT = new Map<string, string>([

@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { CardView, CardFace } from "@compile/shared";
-import { ClientCardDef, protocolColorFromDefId } from "../data/cardDefs";
+import { ClientCardDef, protocolColorFromDefId, protocolAccentFromDefId } from "../data/cardDefs";
 
 export type CardClickCallback = (card: CardView) => void;
 
@@ -55,7 +55,7 @@ export class CardSprite extends Phaser.GameObjects.Container {
 
     const oppositeHue = (h + 180) % 360;
     const outS = Math.max(0.45, s);
-    const outL = l < 0.5 ? 0.72 : 0.28;
+    const outL = l < 0.5 ? 0.86 : 0.34;
 
     const c = (1 - Math.abs(2 * outL - 1)) * outS;
     const hp = oppositeHue / 60;
@@ -103,12 +103,13 @@ export class CardSprite extends Phaser.GameObjects.Container {
     this.isFaceDown = isHidden || (!isHidden && (card as any).face === CardFace.FaceDown);
     const defId     = !isHidden ? (card as any).defId as string : undefined;
     const def       = defId ? cardDefs.get(defId) : undefined;
-    const protoColor = defId ? protocolColorFromDefId(defId) : 0x1a3a5c;
+    const protoColor  = defId ? protocolColorFromDefId(defId) : 0x1a3a5c;
+    const accentColor = defId ? protocolAccentFromDefId(defId) : 0x4488cc;
     this.protoColor  = this.isFaceDown ? 0x666666 : protoColor;
     this.fillNormal  = this.isFaceDown ? 0x2e2e2e : CardSprite.shadeColor(protoColor, 0.7);
     this.fillHover   = this.isFaceDown ? 0x3a3a3a : CardSprite.shadeColor(protoColor, 0.82);
 
-    // ── Background ─────────────────────────────────────────────────────────
+    // ── BackFound ─────────────────────────────────────────────────────────
     const outerStroke = scene.add.rectangle(0, 0, CARD_W + 2, CARD_H + 2, 0x000000, 0)
       .setStrokeStyle(2, 0xffffff, 0.85);
     this.add(outerStroke);
@@ -122,8 +123,8 @@ export class CardSprite extends Phaser.GameObjects.Container {
     if (this.isFaceDown) {
       this.buildFaceDown(scene);
     } else if (def) {
-      const cardTextColor = CardSprite.complementCss(this.fillNormal);
-      this.buildFaceUp(scene, def, covered, protoColor, this.fillNormal, cardTextColor);
+      const cardTextColor = CardSprite.oppositeHueCss(this.fillNormal);
+      this.buildFaceUp(scene, def, covered, protoColor, accentColor, this.fillNormal, cardTextColor);
     }
 
     // Covered cards get a dark translucent overlay to show depth
@@ -163,18 +164,20 @@ export class CardSprite extends Phaser.GameObjects.Container {
     def: ClientCardDef,
     covered: boolean,
     protoColor: number,
+    accentColor: number,
     cardBgFill: number,
     cardTextColor: string
   ): void {
     const hH = CARD_H / 2;   // 63
     const hW = CARD_W / 2;   // 45
-    const titleTextColor = CardSprite.oppositeHueCss(protoColor);
+    const titleTextColor = CardSprite.oppositeHueCss(accentColor);
 
-    // Name bar — top 22px strip, coloured by protocol
-    this.add(scene.add.rectangle(0, -hH + 11, CARD_W, 22, protoColor));
+    // Name bar — top 22px strip, vivid accent colour
+    this.add(scene.add.rectangle(0, -hH + 11, CARD_W, 22, accentColor));
     this.add(scene.add.text(0, -hH + 11, def.name, {
       fontSize: "11px", fontFamily: "monospace", color: titleTextColor, fontStyle: "bold",
       wordWrap: { width: CARD_W - 24 }, align: "center",
+      stroke: "#000000", strokeThickness: 2,
     }).setOrigin(0.5));
 
 
@@ -199,11 +202,13 @@ export class CardSprite extends Phaser.GameObjects.Container {
       // Trigger label
       this.add(scene.add.text(-hW + 3, y0 + 3, tag, {
         fontSize: "7px", fontFamily: "monospace", color: cardTextColor,
+        stroke: "#000000", strokeThickness: 2,
       }).setOrigin(0, 0));
       // Effect text
       this.add(scene.add.text(0, y0 + 13, text, {
         fontSize: "9px", fontFamily: "monospace", color: cardTextColor,
         wordWrap: { width: CARD_W - 8 }, align: "center",
+        stroke: "#000000", strokeThickness: 2,
       }).setOrigin(0.5, 0));
     }
   }
@@ -223,6 +228,7 @@ export class CardSprite extends Phaser.GameObjects.Container {
       fontFamily: "monospace",
       color: textColor,
       fontStyle: "bold",
+      stroke: "#000000", strokeThickness: 2,
     }).setOrigin(0.5));
     return chip;
   }
