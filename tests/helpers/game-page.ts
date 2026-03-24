@@ -29,6 +29,88 @@ export class GamePage {
     return await clickCanvasObjectByTestId(this._page, testId, index);
   }
 
+  private async clickOwnLineZone(lineIndex: number): Promise<boolean> {
+    const point = await this._page.evaluate((li) => {
+      const game = (window as any).__PHASER_GAME__;
+      if (!game) return null;
+      const scene = game.scene?.getScene?.('GameScene');
+      if (!scene?.children?.list) return null;
+
+      const target = scene.children.list.find((go: any) =>
+        typeof go?.getData === 'function' &&
+        go.getData('testid') === 'own-line' &&
+        go.getData('line') === li
+      );
+      if (!target) return null;
+
+      let worldX = target.x ?? 0;
+      let worldY = target.y ?? 0;
+      if (typeof target.getBounds === 'function') {
+        const b = target.getBounds();
+        if (b) {
+          worldX = b.centerX ?? (b.x + b.width / 2);
+          worldY = b.centerY ?? (b.y + b.height / 2);
+        }
+      }
+
+      const canvas = game.canvas as HTMLCanvasElement;
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      const worldW = scene.scale?.width ?? game.config.width ?? 1600;
+      const worldH = scene.scale?.height ?? game.config.height ?? 720;
+
+      return {
+        x: rect.left + worldX * (rect.width / worldW),
+        y: rect.top + worldY * (rect.height / worldH),
+      };
+    }, lineIndex);
+
+    if (!point) return false;
+    await this._page.mouse.click(point.x, point.y);
+    return true;
+  }
+
+  private async clickCanvasHandCardByIndex(cardIndex: number): Promise<boolean> {
+    const point = await this._page.evaluate((idx) => {
+      const game = (window as any).__PHASER_GAME__;
+      if (!game) return null;
+      const scene = game.scene?.getScene?.('GameScene');
+      if (!scene?.children?.list) return null;
+
+      const target = scene.children.list.find((go: any) =>
+        typeof go?.getData === 'function' &&
+        go.getData('testid') === 'card-in-hand' &&
+        go.getData('cardIndex') === idx
+      );
+      if (!target) return null;
+
+      let worldX = target.x ?? 0;
+      let worldY = target.y ?? 0;
+      if (typeof target.getBounds === 'function') {
+        const b = target.getBounds();
+        if (b) {
+          worldX = b.centerX ?? (b.x + b.width / 2);
+          worldY = b.centerY ?? (b.y + b.height / 2);
+        }
+      }
+
+      const canvas = game.canvas as HTMLCanvasElement;
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      const worldW = scene.scale?.width ?? game.config.width ?? 1600;
+      const worldH = scene.scale?.height ?? game.config.height ?? 720;
+
+      return {
+        x: rect.left + worldX * (rect.width / worldW),
+        y: rect.top + worldY * (rect.height / worldH),
+      };
+    }, cardIndex);
+
+    if (!point) return false;
+    await this._page.mouse.click(point.x, point.y);
+    return true;
+  }
+
   /** Get the underlying Playwright Page for advanced operations */
   get page(): Page {
     return this._page;
@@ -46,10 +128,29 @@ export class GamePage {
 
   async waitForGameStart() {
     const waitOnce = async () => {
-      // Wait until test infrastructure is ready and phase chips are present
+      // Wait until test infrastructure is ready.
       await this.page.waitForSelector('[data-testid="game-container"]', { timeout: 15000 });
-      await this.page.waitForSelector('[data-testid="phase-START"]', { timeout: 15000 });
-      // Keep the selector-based mapping in sync by giving Phaser a moment
+      await this.page.waitForFunction(() => {
+        const game = (window as any).__PHASER_GAME__;
+        const scene = game?.scene?.getScene?.('GameScene');
+        return !!scene;
+      }, { timeout: 15000 });
+
+      // Prefer DOM bridge selectors when present; fall back to Phaser object data.
+      const hasDomPhaseChip = await this.page.locator('[data-testid^="phase-"]').count();
+      if (!hasDomPhaseChip) {
+        await this.page.waitForFunction(() => {
+          const game = (window as any).__PHASER_GAME__;
+          const scene = game?.scene?.getScene?.('GameScene');
+          if (!scene?.children?.list) return false;
+          return scene.children.list.some((go: any) =>
+            typeof go?.getData === 'function' &&
+            typeof go.getData('testid') === 'string' &&
+            String(go.getData('testid')).startsWith('phase-')
+          );
+        }, { timeout: 15000 });
+      }
+
       await this.page.waitForTimeout(100);
     };
 
@@ -64,23 +165,54 @@ export class GamePage {
 
   async getCardsInHand(): Promise<number> {
     const cards = await this.page.locator('[data-testid="card-in-hand"]').count();
-    return cards;
+    if (cards > 0) return cards;
+
+    return await this.page.evaluate(() => {
+      const game = (window as any).__PHASER_GAME__;
+      const scene = game?.scene?.getScene?.('GameScene');
+      return scene?.view?.hand?.length ?? 0;
+    });
   }
 
   async selectCard(index: number) {
-    const card = this.page.locator('[data-testid="card-in-hand"]').nth(index);
-    await card.click({ force: true });
+    // Prefer Phaser object click by explicit cardIndex to avoid bridge-order drift.
+    const canvasClicked = await this.clickCanvasHandCardByIndex(index);
+    if (!canvasClicked) {
+      const card = this.page.locator('[data-testid="card-in-hand"]').nth(index);
+      if (await card.count()) {
+        await card.click({ force: true });
+      } else {
+        const clicked = await this.clickCanvasObjectByTestId('card-in-hand', index);
+        if (!clicked) throw new Error(`Unable to select hand card at index ${index}.`);
+      }
+    }
     await this.page.waitForTimeout(100); // Allow animation
   }
 
   async isCardSelected(index: number): Promise<boolean> {
     const card = this.page.locator('[data-testid="card-in-hand"]').nth(index);
-    return (await card.getAttribute('data-selected')) === 'true';
+    if (await card.count()) {
+      return (await card.getAttribute('data-selected')) === 'true';
+    }
+
+    return await this.page.evaluate((cardIndex) => {
+      const game = (window as any).__PHASER_GAME__;
+      const scene = game?.scene?.getScene?.('GameScene');
+      const selected = scene?.selectedCard;
+      const handCard = scene?.view?.hand?.[cardIndex];
+      if (!selected?.instanceId || !handCard?.instanceId) return false;
+      return selected.instanceId === handCard.instanceId;
+    }, index);
   }
 
   async playCardToLine(lineIndex: number) {
     const zone = this.page.locator(`[data-testid="own-line-zone"][data-line="${lineIndex}"]`);
-    await zone.click({ force: true });
+    if (await zone.count()) {
+      await zone.click({ force: true });
+    } else {
+      const clicked = await this.clickOwnLineZone(lineIndex);
+      if (!clicked) throw new Error(`Unable to locate own line zone ${lineIndex}.`);
+    }
     await this.page.waitForTimeout(300); // Allow card to animate into place
   }
 
@@ -95,45 +227,131 @@ export class GamePage {
 
   async toggleFaceDownMode() {
     const button = this.page.locator('[data-testid="toggle-face-down"]');
-    await button.click({ force: true });
+    if (await button.count()) {
+      await button.click({ force: true });
+    } else {
+      const clicked = await this.clickCanvasObjectByTestId('toggle-face-down');
+      if (!clicked) throw new Error('Unable to find face-down toggle control.');
+    }
     await this.page.waitForTimeout(100);
   }
 
   async getLineCardCount(lineIndex: number, isOpponent: boolean = false): Promise<number> {
     const prefix = isOpponent ? 'opp' : 'own';
     const cards = await this.page.locator(`[data-testid="${prefix}-line"][data-line="${lineIndex}"] [data-testid="board-card"]`).count();
-    return cards;
+    if (cards > 0) return cards;
+
+    return await this.page.evaluate(({ li, opp }) => {
+      const game = (window as any).__PHASER_GAME__;
+      const scene = game?.scene?.getScene?.('GameScene');
+      const lines = opp ? scene?.view?.opponentLines : scene?.view?.lines;
+      return lines?.[li]?.cards?.length ?? 0;
+    }, { li: lineIndex, opp: isOpponent });
   }
 
   async getLineValue(lineIndex: number, isOpponent: boolean = false): Promise<number> {
     const prefix = isOpponent ? 'opp' : 'own';
-    const text = await this.page.locator(`[data-testid="${prefix}-line"][data-line="${lineIndex}"] [data-testid="line-value"]`).textContent();
-    return text ? parseInt(text) : 0;
+    const lineValueLocator = this.page.locator(
+      `[data-testid="${prefix}-line"][data-line="${lineIndex}"] [data-testid="line-value"]`
+    );
+    if (await lineValueLocator.count()) {
+      const text = await lineValueLocator.first().textContent();
+      if (text) {
+        const parsed = parseInt(text, 10);
+        if (!Number.isNaN(parsed)) return parsed;
+      }
+    }
+
+    return await this.page.evaluate(({ li, opp }) => {
+      const game = (window as any).__PHASER_GAME__;
+      const scene = game?.scene?.getScene?.('GameScene');
+      const values = opp ? scene?.view?.opponentLineValues : scene?.view?.lineValues;
+      return values?.[li] ?? 0;
+    }, { li: lineIndex, opp: isOpponent });
   }
 
   async clickReset() {
     const button = this.page.locator('[data-testid="reset-button"]');
-    await button.click({ force: true });
+    if (await button.count()) {
+      await button.click({ force: true });
+    } else {
+      const clicked = await this.clickCanvasObjectByTestId('reset-button');
+      if (!clicked) throw new Error('Unable to locate reset button.');
+    }
     await this.page.waitForTimeout(200);
   }
 
   async getActivePhase(): Promise<string> {
     const active = this.page.locator('[data-testid^="phase-"][data-phase-active="true"]');
-    const testId = await active.first().getAttribute('data-testid');
-    return testId?.replace('phase-', '') || 'UNKNOWN';
+    if (await active.count()) {
+      const testId = await active.first().getAttribute('data-testid');
+      return testId?.replace('phase-', '') || 'UNKNOWN';
+    }
+
+    const phase = await this.page.evaluate(() => {
+      const game = (window as any).__PHASER_GAME__;
+      const scene = game?.scene?.getScene?.('GameScene');
+      if (!scene?.children?.list) return null;
+      const activeChip = scene.children.list.find((go: any) =>
+        typeof go?.getData === 'function' &&
+        typeof go.getData('testid') === 'string' &&
+        String(go.getData('testid')).startsWith('phase-') &&
+        go.getData('isActive') === true
+      );
+      const testId = activeChip?.getData?.('testid');
+      if (typeof testId !== 'string') return null;
+      return testId.replace('phase-', '');
+    });
+
+    return phase ?? 'UNKNOWN';
   }
 
   async waitForPhase(phase: string, timeout: number = 5000) {
-    await this.page.waitForSelector(`[data-testid="phase-${phase}"][data-phase-active="true"]`, { timeout });
+    const selector = `[data-testid="phase-${phase}"][data-phase-active="true"]`;
+    if (await this.page.locator(selector).count()) {
+      await this.page.waitForSelector(selector, { timeout });
+      return;
+    }
+
+    await this.page.waitForFunction((targetPhase) => {
+      const game = (window as any).__PHASER_GAME__;
+      const scene = game?.scene?.getScene?.('GameScene');
+      if (!scene?.children?.list) return false;
+      return scene.children.list.some((go: any) =>
+        typeof go?.getData === 'function' &&
+        go.getData('testid') === `phase-${targetPhase}` &&
+        go.getData('isActive') === true
+      );
+    }, phase, { timeout });
   }
 
   async waitForOpponentTurn(timeout: number = 5000) {
-    await this.page.waitForSelector('[data-testid="opponent-turn-status"]', { timeout });
+    const status = this.page.locator('[data-testid="opponent-turn-status"]');
+    if (await status.count()) {
+      await this.page.waitForSelector('[data-testid="opponent-turn-status"]', { timeout });
+      return;
+    }
+
+    await this.page.waitForFunction(() => {
+      const game = (window as any).__PHASER_GAME__;
+      const scene = game?.scene?.getScene?.('GameScene');
+      const isActive = scene?.view?.isActivePlayer;
+      return isActive === false;
+    }, { timeout });
   }
 
   async getYourTurnStatus(): Promise<string> {
     const status = this.page.locator('[data-testid="your-turn-status"]');
-    return await status.textContent() || '';
+    if (await status.count()) {
+      return await status.textContent() || '';
+    }
+
+    const active = await this.page.evaluate(() => {
+      const game = (window as any).__PHASER_GAME__;
+      const scene = game?.scene?.getScene?.('GameScene');
+      return !!scene?.view?.isActivePlayer;
+    });
+    return active ? 'YOUR TURN' : 'OPPONENT TURN';
   }
 
   async hoverOverCard(index: number) {
@@ -157,8 +375,21 @@ export class GamePage {
 
   async compileToLine(lineIndex: number) {
     const button = this.page.locator(`[data-testid="compile-button-line-${lineIndex}"]`);
-    if (await button.isVisible()) {
+    if (await button.isVisible().catch(() => false)) {
       await button.click();
+      await this.page.waitForTimeout(500);
+      return;
+    }
+
+    const triggered = await this.page.evaluate((li) => {
+      const game = (window as any).__PHASER_GAME__;
+      const scene = game?.scene?.getScene?.('GameScene') as any;
+      if (!scene || typeof scene.onCompileClick !== 'function') return false;
+      scene.onCompileClick(li);
+      return true;
+    }, lineIndex);
+
+    if (triggered) {
       await this.page.waitForTimeout(500);
     }
   }

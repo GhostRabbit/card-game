@@ -287,7 +287,7 @@ test.describe('play_facedown - two-stage hand then line', () => {
 });
 
 test.describe('rearrange_protocols (auto-execute with protocol reorder)', () => {
-  test('shows CONFIRM button', async ({ gamePage }) => {
+  test('shows protocol reorder interaction without CONFIRM button', async ({ gamePage }) => {
     await gamePage.gotoForEffect('rearrange_protocols');
 
     expect(await gamePage.isEffectResolutionActive()).toBe(true);
@@ -295,6 +295,8 @@ test.describe('rearrange_protocols (auto-execute with protocol reorder)', () => 
     const description = (await gamePage.getStatusText('effect-description')) ?? '';
     expect(description).toContain('Water');
 
-    expect(await gamePage.hasConfirmButton()).toBe(true);
+    expect(await gamePage.hasConfirmButton()).toBe(false);
+    const hint = (await gamePage.getStatusText('effect-hint')) ?? '';
+    expect(hint.toLowerCase()).toContain('click protocols');
   });
 });

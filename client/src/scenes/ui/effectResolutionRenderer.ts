@@ -79,6 +79,31 @@ function addHint(
     .setData("testid", "effect-hint"));
 }
 
+function addConfirmButton(
+  ctx: EffectResolutionContext,
+  description: string,
+  onConfirm: () => void,
+  testId = "confirm-effect-button",
+): void {
+  const { scene, layout: L, addHud } = ctx;
+  const btn = scene.add.rectangle(L.btnCx, L.resetY, 200, 46, ctx.confirmFillNum)
+    .setStrokeStyle(2, ctx.confirmStrokeNum)
+    .setInteractive({ useHandCursor: true })
+    .setName(testId)
+    .setData("testid", testId);
+  btn.on("pointerover", () => btn.setFillStyle(ctx.confirmHoverNum));
+  btn.on("pointerout",  () => btn.setFillStyle(ctx.confirmFillNum));
+  btn.on("pointerdown", onConfirm);
+  addHud(btn);
+  addHud(scene.add.text(L.btnCx, L.resetY - 9, "▶  CONFIRM", {
+    fontSize: "13px", fontFamily: "monospace", color: ctx.confirmTextColor, fontStyle: "bold",
+  }).setOrigin(0.5));
+  addHud(scene.add.text(L.btnCx, L.resetY + 10, description, {
+    fontSize: "9px", fontFamily: "monospace", color: ctx.confirmTextColor,
+    wordWrap: { width: 190 }, align: "center",
+  }).setOrigin(0.5));
+}
+
 function addSkipButton(ctx: EffectResolutionContext, onClick: () => void): void {
   const { scene, layout: L, addHud } = ctx;
   const skipBtn = scene.add.rectangle(L.btnCx, L.resetY, 160, 32, 0x0d2010)
@@ -140,10 +165,12 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
         const hc = view.hand.find(c => "instanceId" in c && (c as CardInstance).instanceId === handTargetId);
         const handCardName = hc && "defId" in hc ? (CLIENT_CARD_DEFS.get((hc as CardInstance).defId)?.name ?? "Card") : "Card";
         addHint(ctx, `Playing ${handCardName} face-down — choose a line:`);
+        const sourceLine = myEffect.sourceInstanceId ? ctx.findOwnLineOfInstance(myEffect.sourceInstanceId) : null;
+        const isLineAllowed = sourceLine == null ? undefined : (li: number) => li !== sourceLine;
         ctx.renderLinePicker("own", (li) => {
           ctx.emitResolveEffect({ id: myEffect.id, targetInstanceId: handTargetId!, targetLineIndex: li });
           ctx.state.setEffectHandTargetId(null);
-        });
+        }, isLineAllowed);
       }
     } else if (spec.handPick) {
       const pickLabel = myEffect.type === "exchange_hand"
@@ -170,7 +197,7 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
         const protoColor = PROTOCOL_ACCENT_COLORS.get(proto.protocolId) ?? 0x4488cc;
         const pickIdx = picks.indexOf(proto.protocolId);
         const isPicked = pickIdx !== -1;
-        const chipX = L.W / 2 + (i - 1) * 200;
+        const chipX = L.lineCx[i];
         const chipY = 590;
         const chipBg = scene.add.rectangle(chipX, chipY, 180, 38,
           isPicked ? 0x111111 : protoColor)
@@ -210,19 +237,10 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
       }
 
       if (picks.length === 2) {
-        const confirmBtn = scene.add.rectangle(L.btnCx, L.resetY, 160, 32, ctx.confirmFillNum)
-          .setStrokeStyle(2, ctx.confirmStrokeNum).setInteractive({ useHandCursor: true })
-          .setName("confirm-effect-button").setData("testid", "confirm-effect-button");
-        confirmBtn.on("pointerover", () => confirmBtn.setFillStyle(ctx.confirmHoverNum));
-        confirmBtn.on("pointerout", () => confirmBtn.setFillStyle(ctx.confirmFillNum));
-        confirmBtn.on("pointerdown", () => {
+        addConfirmButton(ctx, myEffect.description, () => {
           ctx.emitResolveEffect({ id: myEffect.id, swapProtocolIds: [...picks] });
           ctx.state.setControlReorderPicks([]);
         });
-        addHud(confirmBtn);
-        addHud(scene.add.text(L.btnCx, L.resetY, "▶  CONFIRM", {
-          fontSize: "13px", fontFamily: "monospace", color: ctx.confirmTextColor, fontStyle: "bold",
-        }).setOrigin(0.5));
       }
     } else if (myEffect.type === "rearrange_protocols") {
       const whose = myEffect.payload.whose as "self" | "opponent";
@@ -241,7 +259,7 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
         const protoColor = PROTOCOL_ACCENT_COLORS.get(proto.protocolId) ?? 0x4488cc;
         const pickIdx = picks.indexOf(proto.protocolId);
         const isPicked = pickIdx !== -1;
-        const chipX = L.W / 2 + (i - 1) * 200;
+        const chipX = L.lineCx[i];
         const chipY = 590;
         const chipBg = scene.add.rectangle(chipX, chipY, 180, 38,
           isPicked ? 0x111111 : protoColor)
@@ -285,33 +303,13 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
       }
 
       if (picks.length === 3) {
-        const confirmBtn = scene.add.rectangle(L.btnCx, L.resetY, 160, 32, ctx.confirmFillNum)
-          .setStrokeStyle(2, ctx.confirmStrokeNum).setInteractive({ useHandCursor: true })
-          .setName("confirm-effect-button").setData("testid", "confirm-effect-button");
-        confirmBtn.on("pointerover", () => confirmBtn.setFillStyle(ctx.confirmHoverNum));
-        confirmBtn.on("pointerout", () => confirmBtn.setFillStyle(ctx.confirmFillNum));
-        confirmBtn.on("pointerdown", () => {
+        addConfirmButton(ctx, myEffect.description, () => {
           ctx.emitResolveEffect({ id: myEffect.id, newProtocolOrder: [...picks] });
           ctx.state.setControlReorderPicks([]);
         });
-        addHud(confirmBtn);
-        addHud(scene.add.text(L.btnCx, L.resetY, "▶  CONFIRM", {
-          fontSize: "13px", fontFamily: "monospace", color: ctx.confirmTextColor, fontStyle: "bold",
-        }).setOrigin(0.5));
       }
     } else if (spec.isAutoExecute) {
-      const btn = scene.add.rectangle(L.btnCx, L.resetY, 160, 32, ctx.confirmFillNum)
-        .setStrokeStyle(2, ctx.confirmStrokeNum)
-        .setInteractive({ useHandCursor: true })
-        .setName("confirm-effect-button")
-        .setData("testid", "confirm-effect-button");
-      btn.on("pointerover", () => btn.setFillStyle(ctx.confirmHoverNum));
-      btn.on("pointerout", () => btn.setFillStyle(ctx.confirmFillNum));
-      btn.on("pointerdown", () => ctx.emitResolveEffect({ id: myEffect.id }));
-      addHud(btn);
-      addHud(scene.add.text(L.btnCx, L.resetY, "▶  CONFIRM", {
-        fontSize: "13px", fontFamily: "monospace", color: ctx.confirmTextColor, fontStyle: "bold",
-      }).setOrigin(0.5));
+      addConfirmButton(ctx, myEffect.description, () => ctx.emitResolveEffect({ id: myEffect.id }));
     } else if (spec.boardMode && !ctx.state.getEffectBoardTargetId()) {
       const allBoardCards: Array<{ card: CardView; pi: 0 | 1; idx: number; total: number }> = [];
       const ownPi = myIndex;
@@ -328,7 +326,7 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
 
       if (!hasValidTarget) {
         addHint(ctx, "No valid targets on the board.", "#445566");
-        const confirmNoneBtn = scene.add.rectangle(L.btnCx, L.resetY, 160, 32, 0x0d2010)
+        const confirmNoneBtn = scene.add.rectangle(L.btnCx, L.resetY, 200, 46, 0x0d2010)
           .setStrokeStyle(2, ctx.confirmStrokeNum)
           .setInteractive({ useHandCursor: true })
           .setName("skip-effect-button")
@@ -337,8 +335,12 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
         confirmNoneBtn.on("pointerout", () => confirmNoneBtn.setFillStyle(ctx.confirmFillNum));
         confirmNoneBtn.on("pointerdown", () => ctx.emitResolveEffect({ id: myEffect.id }));
         addHud(confirmNoneBtn);
-        addHud(scene.add.text(L.btnCx, L.resetY, "CONFIRM NONE", {
+        addHud(scene.add.text(L.btnCx, L.resetY - 9, "▶  CONFIRM (no targets)", {
           fontSize: "13px", fontFamily: "monospace", color: ctx.confirmTextColor, fontStyle: "bold",
+        }).setOrigin(0.5));
+        addHud(scene.add.text(L.btnCx, L.resetY + 10, myEffect.description, {
+          fontSize: "9px", fontFamily: "monospace", color: ctx.confirmTextColor,
+          wordWrap: { width: 190 }, align: "center",
         }).setOrigin(0.5));
       } else {
         addHint(ctx, ctx.getBoardPickHint(spec.boardMode));

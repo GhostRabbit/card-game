@@ -101,33 +101,15 @@ test.describe('Card Effects', () => {
 
 test.describe('Turn End and Opponent Turn', () => {
   test('should show opponent turn after action phase', async ({ gamePage }) => {
-    let turnCount = 0;
-    const maxWait = 15000; // 15 seconds max
-    const startTime = Date.now();
-    
-    // Play some cards and progress through turn
+    // Play a card and ensure turn-status remains readable as state progresses.
     const handCount = await gamePage.getCardsInHand();
     if (handCount > 0) {
-      // Play a card
       await gamePage.selectCard(0);
       await gamePage.playCardToLine(0);
-      
-      // Wait for turn to progress
-      while (turnCount < 3000 && (Date.now() - startTime) < maxWait) {
-        try {
-          await gamePage.waitForOpponentTurn(500);
-          // If we get here, opponent turn is showing
-          turnCount = 1;
-          break;
-        } catch {
-          // Keep waiting
-          await gamePage.page.waitForTimeout(500);
-        }
-      }
-      
-      // Either opponent's turn is showing or we're still in our action phase
+
+      await gamePage.page.waitForTimeout(1000);
       const status = await gamePage.getYourTurnStatus();
-      expect(status).toBeTruthy(); // Should show some turn status
+      expect(status.toLowerCase()).toContain('turn');
     }
   });
 

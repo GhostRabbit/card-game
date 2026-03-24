@@ -122,12 +122,16 @@ export function renderFocusProtocol(
 
   const ownVal = view.lineValues[lineIndex];
   const oppVal = view.opponentLineValues[lineIndex];
-  const myProtoId = view.protocols[lineIndex]?.protocolId ?? "";
-  const oppProtoId = view.opponentProtocols[lineIndex]?.protocolId ?? "";
-  const myCom = view.protocols[lineIndex]?.status === ProtocolStatus.Compiled;
-  const oppCom = view.opponentProtocols[lineIndex]?.status === ProtocolStatus.Compiled;
-  const myLoad = view.protocols[lineIndex]?.status === ProtocolStatus.Loading;
-  const oppLoad = view.opponentProtocols[lineIndex]?.status === ProtocolStatus.Loading;
+  // Prefer lineIndex-based lookup (reorder-safe), but fall back to array slot so
+  // both protocol cards still render if a transient/state view omits lineIndex.
+  const myProto = view.protocols.find((p) => p.lineIndex === lineIndex) ?? view.protocols[lineIndex];
+  const oppProto = view.opponentProtocols.find((p) => p.lineIndex === lineIndex) ?? view.opponentProtocols[lineIndex];
+  const myProtoId = myProto?.protocolId ?? "";
+  const oppProtoId = oppProto?.protocolId ?? "";
+  const myCom = myProto?.status === ProtocolStatus.Compiled;
+  const oppCom = oppProto?.status === ProtocolStatus.Compiled;
+  const myLoad = myProto?.status === ProtocolStatus.Loading;
+  const oppLoad = oppProto?.status === ProtocolStatus.Loading;
 
   const panelLeft = cx - pw / 2;
   const panelRight = cx + pw / 2;
@@ -152,23 +156,23 @@ export function renderFocusProtocol(
     const accentText = complementaryProtoColor(protoId);
     const protoName = PROTOCOL_NAMES_CLIENT.get(protoId) ?? protoId;
 
-    const borderColor = compiled ? 0x00ffcc : loading ? 0x1e2e40 : 0x2d5a8a;
+    const borderColor = compiled ? 0x00ffcc : accentColor;
 
-    addToFocusPanel(scene, group, scene.add.rectangle(cardCx, cardCy, cardW, cardH, loading ? 0x0e1620 : bodyColor)
+    addToFocusPanel(scene, group, scene.add.rectangle(cardCx, cardCy, cardW, cardH, bodyColor)
       .setStrokeStyle(2, borderColor)
-      .setAlpha(loading ? 0.6 : 1));
-    addToFocusPanel(scene, group, scene.add.rectangle(cardCx, cardTop + 10, cardW, 20, loading ? 0x1a2a3d : accentColor)
-      .setAlpha(loading ? 0.6 : 1));
+      .setAlpha(1));
+    addToFocusPanel(scene, group, scene.add.rectangle(cardCx, cardTop + 10, cardW, 20, accentColor)
+      .setAlpha(1));
 
     addToFocusPanel(scene, group, scene.add.text(cardCx, cardTop + 10, protoName, {
       fontSize: "12px", fontFamily: "monospace", fontStyle: "bold",
-      color: loading ? "#2a3f55" : accentText,
+      color: accentText,
       wordWrap: { width: cardW - 6 }, align: "center",
       stroke: "#000000", strokeThickness: 2,
     }).setOrigin(0.5, 0.5));
 
-    const statusLabel = compiled ? "✓ COMPILED" : loading ? "LOADING" : "active";
-    const statusColor = compiled ? "#00ffcc" : loading ? "#2a4060" : "#4d88aa";
+    const statusLabel = compiled ? "✓ COMPILED" : loading ? "ACTIVE" : "active";
+    const statusColor = compiled ? "#00ffcc" : "#4d88aa";
     addToFocusPanel(scene, group, scene.add.text(cardCx, cardBottom - 4, statusLabel, {
       fontSize: "7px", fontFamily: "monospace", fontStyle: "bold", color: statusColor,
       stroke: "#000000", strokeThickness: 1,

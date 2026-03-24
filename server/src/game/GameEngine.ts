@@ -585,6 +585,9 @@ export function refresh(state: ServerGameState, playerIndex: 0 | 1): PlayCardRes
   if (state.turnPhase !== TurnPhase.Action)
     return { success: false, reason: "Wrong phase." };
 
+  if (state.players[playerIndex].hand.length >= 5)
+    return { success: false, reason: "Cannot refresh with 5 or more cards in hand." };
+
   const player = state.players[playerIndex];
   const needed = 5 - player.hand.length;
   if (needed > 0) drawCards(state, playerIndex, needed);

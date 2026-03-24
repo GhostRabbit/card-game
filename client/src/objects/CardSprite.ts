@@ -19,6 +19,8 @@ export class CardSprite extends Phaser.GameObjects.Container {
   private readonly protoColor: number;
   private readonly fillNormal: number;
   private readonly fillHover: number;
+  private readonly cardW: number;
+  private readonly cardH: number;
 
   private static shadeColor(color: number, factor: number): number {
     const r = Math.max(0, Math.min(255, Math.floor(((color >> 16) & 0xff) * factor)));
@@ -93,11 +95,15 @@ export class CardSprite extends Phaser.GameObjects.Container {
     card: CardView,
     cardDefs: Map<string, ClientCardDef>,
     /** True when another card sits on top of this one in the stack */
-    covered = false
+    covered = false,
+    /** Scales card frame size while preserving font sizes */
+    sizeScale = 1
   ) {
     super(scene, x, y);
     this.cardData = card;
     this.cardDefs = cardDefs;
+    this.cardW = Math.round(CARD_W * sizeScale);
+    this.cardH = Math.round(CARD_H * sizeScale);
 
     const isHidden  = "hidden" in card;
     this.isFaceDown = isHidden || (!isHidden && (card as any).face === CardFace.FaceDown);
@@ -110,13 +116,13 @@ export class CardSprite extends Phaser.GameObjects.Container {
     this.fillHover   = this.isFaceDown ? 0x3a3a3a : CardSprite.shadeColor(protoColor, 0.82);
 
     // ── BackFound ─────────────────────────────────────────────────────────
-    const outerStroke = scene.add.rectangle(0, 0, CARD_W + 2, CARD_H + 2, 0x000000, 0)
+    const outerStroke = scene.add.rectangle(0, 0, this.cardW + 2, this.cardH + 2, 0x000000, 0)
       .setStrokeStyle(2, 0xffffff, 0.85);
     this.add(outerStroke);
 
     const bgFill   = this.fillNormal;
     const bgStroke = this.protoColor;
-    this.bg = scene.add.rectangle(0, 0, CARD_W, CARD_H, bgFill)
+    this.bg = scene.add.rectangle(0, 0, this.cardW, this.cardH, bgFill)
       .setStrokeStyle(1.5, bgStroke);
     this.add(this.bg);
 
@@ -130,7 +136,7 @@ export class CardSprite extends Phaser.GameObjects.Container {
     // Covered cards get a dark translucent overlay to show depth
     if (covered) {
       this.add(
-        scene.add.rectangle(0, 0, CARD_W, CARD_H, 0x000000)
+        scene.add.rectangle(0, 0, this.cardW, this.cardH, 0x000000)
           .setAlpha(0.45)
       );
     }
@@ -153,7 +159,7 @@ export class CardSprite extends Phaser.GameObjects.Container {
     this.add(this.valueChip(scene, FACE_DOWN_VALUE, "#cccccc", 0x3a3a3a, true));
 
     // "FACE DOWN" label
-    this.add(scene.add.text(0, CARD_H / 2 - 9, "FACE DOWN", {
+    this.add(scene.add.text(0, this.cardH / 2 - 9, "FACE DOWN", {
       fontSize: "8px", fontFamily: "monospace", color: "#888888",
     }).setOrigin(0.5, 1));
   }
@@ -168,16 +174,15 @@ export class CardSprite extends Phaser.GameObjects.Container {
     cardBgFill: number,
     cardTextColor: string
   ): void {
-    const hH = CARD_H / 2;   // 63
-    const hW = CARD_W / 2;   // 45
+    const hH = this.cardH / 2;
+    const hW = this.cardW / 2;
     const titleTextColor = CardSprite.oppositeHueCss(accentColor);
 
     // Name bar — top 22px strip, vivid accent colour
-    this.add(scene.add.rectangle(0, -hH + 11, CARD_W, 22, accentColor));
+    this.add(scene.add.rectangle(0, -hH + 11, this.cardW, 22, accentColor));
     this.add(scene.add.text(0, -hH + 11, def.name, {
-      fontSize: "11px", fontFamily: "monospace", color: titleTextColor, fontStyle: "bold",
-      wordWrap: { width: CARD_W - 24 }, align: "center",
-      stroke: "#000000", strokeThickness: 2,
+      fontSize: "9px", fontFamily: "monospace", color: titleTextColor, fontStyle: "bold",
+      wordWrap: { width: this.cardW - 24 }, align: "center",
     }).setOrigin(0.5));
 
 
@@ -194,21 +199,19 @@ export class CardSprite extends Phaser.GameObjects.Container {
 
     const dividerYs = covered ? [-41] : [-41, -13, 15, 43];
     for (const lineY of dividerYs) {
-      this.add(scene.add.rectangle(0, lineY, CARD_W, 1, this.protoColor));
+      this.add(scene.add.rectangle(0, lineY, this.cardW, 1, this.protoColor));
     }
 
     for (const { tag, text, y0 } of sections) {
       if (!text) continue;
       // Trigger label
       this.add(scene.add.text(-hW + 3, y0 + 3, tag, {
-        fontSize: "7px", fontFamily: "monospace", color: cardTextColor,
-        stroke: "#000000", strokeThickness: 2,
+        fontSize: "6px", fontFamily: "monospace", color: cardTextColor,
       }).setOrigin(0, 0));
       // Effect text
       this.add(scene.add.text(0, y0 + 13, text, {
-        fontSize: "9px", fontFamily: "monospace", color: cardTextColor,
-        wordWrap: { width: CARD_W - 8 }, align: "center",
-        stroke: "#000000", strokeThickness: 2,
+        fontSize: "8px", fontFamily: "monospace", color: cardTextColor,
+        wordWrap: { width: this.cardW - 8 }, align: "center",
       }).setOrigin(0.5, 0));
     }
   }
@@ -221,14 +224,13 @@ export class CardSprite extends Phaser.GameObjects.Container {
     bgColor: number,
     muted: boolean
   ): Phaser.GameObjects.Container {
-    const chip = scene.add.container(CARD_W / 2 - 11, -CARD_H / 2 + 11);
+    const chip = scene.add.container(this.cardW / 2 - 11, -this.cardH / 2 + 11);
     chip.add(scene.add.circle(0, 0, 10, bgColor));
     chip.add(scene.add.text(0, 0, String(value), {
-      fontSize: muted ? "13px" : "15px",
+      fontSize: muted ? "11px" : "13px",
       fontFamily: "monospace",
       color: textColor,
       fontStyle: "bold",
-      stroke: "#000000", strokeThickness: 2,
     }).setOrigin(0.5));
     return chip;
   }

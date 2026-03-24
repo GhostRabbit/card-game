@@ -227,6 +227,7 @@ function scanPassives(
 
 /**
  * Take the top card from a player's deck (reshuffles trash if empty).
+ * Use for draw-style effects.
  * Returns null if both deck and trash are empty.
  */
 function takeDeckCard(
@@ -252,6 +253,25 @@ function takeDeckCard(
 }
 
 /**
+ * Take the top card from a player's deck without reshuffling trash.
+ * Use for non-draw effects that play/reveal/discard top-deck cards.
+ */
+function takeTopDeckCardNoReshuffle(
+  state: ServerGameState,
+  playerIndex: 0 | 1,
+  log: (msg: string) => void,
+): CardInstance | null {
+  const deck = state.decks[playerIndex];
+  if (deck.length === 0) {
+    log("deck empty — cannot take top card");
+    return null;
+  }
+  const drawn = deck.shift()!;
+  state.players[playerIndex].deckSize = deck.length;
+  return drawn;
+}
+
+/**
  * Take the top card from a player's deck and push it face-down onto a line.
  */
 function pushDeckCardFaceDown(
@@ -260,7 +280,7 @@ function pushDeckCardFaceDown(
   targetLine: { cards: CardInstance[] },
   log: (msg: string) => void,
 ): void {
-  const drawn = takeDeckCard(state, playerIndex, log);
+  const drawn = takeTopDeckCardNoReshuffle(state, playerIndex, log);
   if (!drawn) return;
   drawn.face = CardFace.FaceDown;
   const prevTop = targetLine.cards.length > 0 ? targetLine.cards[targetLine.cards.length - 1] : null;
@@ -502,6 +522,10 @@ export function executeEffect(
         for (const line of player.lines) {
           const idx = line.cards.findIndex((c) => c.instanceId === targetId);
           if (idx !== -1) {
+            if (idx !== line.cards.length - 1) {
+              log("return: target must be uncovered");
+              break outer;
+            }
             const [returned] = line.cards.splice(idx, 1);
             returned.face = CardFace.FaceUp;
             state.players[ownerIndex].hand.push(returned);
@@ -869,11 +893,21 @@ export function executeEffect(
         for (const line of state.players[pi].lines) {
           const c = line.cards.find((c) => c.instanceId === targetId);
           if (c) {
-            if (targets === "any_facedown" && c.face !== CardFace.FaceDown) {
-              log("delete any_facedown: target is not face-down");
+            const cIdx = line.cards.findIndex((cc) => cc.instanceId === targetId);
+            const isUncovered = cIdx === line.cards.length - 1;
+            if (targets === "any_card" && !isUncovered) {
+              log("delete any_card: target must be uncovered");
+              break outer;
+            }
+            if (targets === "any_facedown" && (c.face !== CardFace.FaceDown || !isUncovered)) {
+              log("delete any_facedown: target must be uncovered face-down");
               break outer;
             }
             if (targets === "value_0_or_1") {
+              if (!isUncovered) {
+                log("delete value_0_or_1: target must be uncovered");
+                break outer;
+              }
               const def = CARD_MAP.get(c.defId);
               const val = c.face === CardFace.FaceDown ? 2 : (def?.value ?? 0);
               if (val > 1) {
@@ -1439,7 +1473,7 @@ export function executeEffect(
         foundLine = true;
         const times = Math.floor(line.cards.length / 2);
         for (let i = 0; i < times; i++) {
-          const drawn = takeDeckCard(state, ownerIndex, log);
+          const drawn = takeTopDeckCardNoReshuffle(state, ownerIndex, log);
           if (!drawn) break;
           drawn.face = CardFace.FaceDown;
           const idx = line.cards.findIndex((c) => c.instanceId === sourceInstanceId);
@@ -1586,14 +1620,22 @@ export function executeEffect(
         log("flip: cannot flip the source card (any_other)");
         break;
       }
+      if (targets === "any_card" && isCardCovered(state, targetId)) {
+        log("flip: target must be an uncovered card");
+        break;
+      }
+      if (targets === "any_other" && isCardCovered(state, targetId)) {
+        log("flip: target must be an uncovered card");
+        break;
+      }
       if (targets === "opponent_faceup") {
-        if (flipOwnerIdx === ownerIndex || flipTarget.face !== CardFace.FaceUp) {
+        if (flipOwnerIdx === ownerIndex || flipTarget.face !== CardFace.FaceUp || isCardCovered(state, targetId)) {
           log("flip: target must be an opponent face-up card");
           break;
         }
       }
-      if (targets === "opponent_any" && flipOwnerIdx === ownerIndex) {
-        log("flip: target must be an opponent's card");
+      if (targets === "opponent_any" && (flipOwnerIdx === ownerIndex || isCardCovered(state, targetId))) {
+        log("flip: target must be an opponent's uncovered card");
         break;
       }
       if (targets === "any_uncovered" && isCardCovered(state, targetId!)) {
@@ -1606,8 +1648,8 @@ export function executeEffect(
           break;
         }
       }
-      if (targets === "any_facedown" && flipTarget.face !== CardFace.FaceDown) {
-        log("flip: target must be a face-down card");
+      if (targets === "any_facedown" && (flipTarget.face !== CardFace.FaceDown || isCardCovered(state, targetId))) {
+        log("flip: target must be an uncovered face-down card");
         break;
       }
       if (targets === "own_covered_in_line") {
@@ -1700,17 +1742,23 @@ export function executeEffect(
         }
         if (srcLine === -1) { log("shift own_facedown_in_line: source line not found"); break; }
         if (srcLine === targetLineIndex) { log("shift own_facedown_in_line: source and target are the same line"); break; }
-        const srcRef = state.players[ownerIndex].lines[srcLine];
-        const toMove = srcRef.cards.filter((c) => c.face === CardFace.FaceDown && c.instanceId !== sourceInstanceId);
-        const ofilDest = state.players[ownerIndex].lines[targetLineIndex];
-        const ofilPrevTop = ofilDest.cards.length > 0 ? ofilDest.cards[ofilDest.cards.length - 1] : null;
-        for (const c of [...toMove]) {
-          const idx = srcRef.cards.indexOf(c);
-          if (idx !== -1) srcRef.cards.splice(idx, 1);
-          ofilDest.cards.push(c);
+        let movedCount = 0;
+        for (const pi of [0, 1] as const) {
+          const srcRef = state.players[pi].lines[srcLine];
+          const toMove = srcRef.cards.filter((c) => c.face === CardFace.FaceDown && c.instanceId !== sourceInstanceId);
+          const destRef = state.players[pi].lines[targetLineIndex];
+          const prevTop = destRef.cards.length > 0 ? destRef.cards[destRef.cards.length - 1] : null;
+
+          for (const c of [...toMove]) {
+            const idx = srcRef.cards.indexOf(c);
+            if (idx !== -1) srcRef.cards.splice(idx, 1);
+            destRef.cards.push(c);
+          }
+
+          if (toMove.length > 0 && prevTop) enqueueEffectsOnCover(state, prevTop, pi);
+          movedCount += toMove.length;
         }
-        if (ofilPrevTop) enqueueEffectsOnCover(state, ofilPrevTop, ownerIndex);
-        log(`shift own_facedown_in_line: moved ${toMove.length} card(s) from line ${srcLine} to line ${targetLineIndex}`);
+        log(`shift own_facedown_in_line: moved ${movedCount} card(s) from line ${srcLine} to line ${targetLineIndex}`);
         break;
       }
 
@@ -1734,6 +1782,7 @@ export function executeEffect(
         }
         const found = findShiftCard(targetId);
         if (!found) { log(`shift: card ${targetId} not found`); break; }
+        if (isCardCovered(state, found.card.instanceId)) { log("shift: target must be uncovered"); break; }
         if (found.pi !== ownerIndex) { log("shift: grv_1 may only shift own cards"); break; }
         if (srcLine < 0 || srcLine > 2) { log("shift: source line not found"); break; }
         // "Either to or from this line":
@@ -1759,7 +1808,7 @@ export function executeEffect(
 
       // any_facedown: drk_4 (player-chosen dest) or grv_4 (toSourceLine: true)
       if (targets === "any_facedown") {
-        if (found.card.face !== CardFace.FaceDown) { log("shift any_facedown: target must be face-down"); break; }
+        if (found.card.face !== CardFace.FaceDown || isCardCovered(state, found.card.instanceId)) { log("shift any_facedown: target must be uncovered face-down"); break; }
         const dest = toSourceLine ? srcLine : targetLineIndex;
         if (dest === undefined || dest < 0 || dest > 2) { log("shift any_facedown: no valid destination line"); break; }
         doShift(found, dest);
@@ -1782,6 +1831,7 @@ export function executeEffect(
       // opponent_any: psy_3 — any opponent card
       if (targets === "opponent_any") {
         if (found.pi === ownerIndex) { log("shift opponent_any: must target opponent's card"); break; }
+        if (isCardCovered(state, found.card.instanceId)) { log("shift opponent_any: target must be uncovered"); break; }
         doShift(found, targetLineIndex);
         break;
       }
@@ -1789,7 +1839,7 @@ export function executeEffect(
       // opponent_facedown: spd_4 — opponent face-down card
       if (targets === "opponent_facedown") {
         if (found.pi === ownerIndex) { log("shift opponent_facedown: must target opponent's card"); break; }
-        if (found.card.face !== CardFace.FaceDown) { log("shift opponent_facedown: target must be face-down"); break; }
+        if (found.card.face !== CardFace.FaceDown || isCardCovered(state, found.card.instanceId)) { log("shift opponent_facedown: target must be uncovered face-down"); break; }
         doShift(found, targetLineIndex);
         break;
       }
@@ -1797,6 +1847,7 @@ export function executeEffect(
       // own_others: spd_3 — own card that is not the source
       if (targets === "own_others") {
         if (found.pi !== ownerIndex) { log("shift own_others: must target own card"); break; }
+        if (isCardCovered(state, found.card.instanceId)) { log("shift own_others: target must be uncovered"); break; }
         if (sourceInstanceId && found.card.instanceId === sourceInstanceId) {
           log("shift own_others: cannot shift source card"); break;
         }

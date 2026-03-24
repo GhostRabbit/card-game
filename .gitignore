@@ -14,6 +14,7 @@ build/
 coverage/
 .nyc_output/
 test-results*
+test-results*/*
 playwright/
 
 # Playwright

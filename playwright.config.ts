@@ -15,7 +15,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   reporter: [
-    ['html', { outputFolder: 'test-results-latest' }],
+    ['html', { outputFolder: 'test-results-latest', open: 'never' }],
     ['list'],
   ],
   use: {

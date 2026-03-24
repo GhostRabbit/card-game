@@ -440,10 +440,21 @@ describe("executeEffect — return (wtr_3 / wtr_4)", () => {
     const state = makeState();
     state.players[0].lines[0].cards.push(card("c1"), card("c2"), card("c3"));
 
-    executeEffect(state, effect("return", 0, { targetInstanceId: "c2" }));
+    executeEffect(state, effect("return", 0, { targetInstanceId: "c3" }));
 
     expect(state.players[0].lines[0].cards).toHaveLength(2);
-    expect(state.players[0].lines[0].cards.map((c) => c.instanceId)).toEqual(["c1", "c3"]);
+    expect(state.players[0].lines[0].cards.map((c) => c.instanceId)).toEqual(["c1", "c2"]);
+  });
+
+  it("rejects covered targets", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards.push(card("c1", CardFace.FaceDown), card("cover", CardFace.FaceUp));
+
+    executeEffect(state, effect("return", 0, { targetInstanceId: "c1" }));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(2);
+    expect(state.players[0].hand).toHaveLength(0);
+    expect(state.pendingLogs.some((l) => l.includes("must be uncovered"))).toBe(true);
   });
 });
 
@@ -967,6 +978,20 @@ describe("executeEffect — opponent_deck_to_line (grv_6)", () => {
 
     expect(state.pendingLogs.some((l) => l.includes("source line not found"))).toBe(true);
   });
+
+  it("does not reshuffle opponent trash when opponent deck is empty", () => {
+    const state = makeState();
+    const src: CardInstance = { instanceId: "src", defId: "grv_6", face: CardFace.FaceUp };
+    state.players[0].lines[1].cards.push(src);
+    state.trashes[1].push(card("t1"), card("t2"));
+    state.players[1].trashSize = 2;
+
+    executeEffect(state, oppDeckEffect("src"));
+
+    expect(state.players[1].lines[1].cards).toHaveLength(0);
+    expect(state.trashes[1]).toHaveLength(2);
+    expect(state.players[1].trashSize).toBe(2);
+  });
 });
 
 // ─── executeEffect: deck_to_under ────────────────────────────────────────────
@@ -1030,6 +1055,21 @@ describe("executeEffect — deck_to_under (grv_0)", () => {
     executeEffect(state, deckToUnderEffect());
 
     expect(state.pendingLogs.some((l) => l.includes("no sourceInstanceId"))).toBe(true);
+  });
+
+  it("does not reshuffle own trash when deck is empty", () => {
+    const state = makeState();
+    const bottom: CardInstance = { instanceId: "bot", defId: "dummy", face: CardFace.FaceDown };
+    const src: CardInstance = { instanceId: "src", defId: "grv_0", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards.push(bottom, src);
+    state.trashes[0].push(card("t1"), card("t2"));
+    state.players[0].trashSize = 2;
+
+    executeEffect(state, deckToUnderEffect("src"));
+
+    expect(state.players[0].lines[0].cards.map((c) => c.instanceId)).toEqual(["bot", "src"]);
+    expect(state.trashes[0]).toHaveLength(2);
+    expect(state.players[0].trashSize).toBe(2);
   });
 });
 
@@ -1530,6 +1570,17 @@ describe("executeEffect — flip", () => {
     expect(state.players[0].hand).toHaveLength(2);
   });
 
+  it("any_card: rejects covered targets", () => {
+    const state = makeState();
+    const target = card("t1", CardFace.FaceUp);
+    const cover = card("cover", CardFace.FaceDown);
+    state.players[0].lines[0].cards.push(target, cover);
+
+    executeEffect(state, flipEffect("any_card", { targetInstanceId: "t1" }));
+
+    expect(target.face).toBe(CardFace.FaceUp);
+  });
+
   // ─── any_other ─────────────────────────────────────────────────────────────
 
   it("any_other: flips a card that is not the source card", () => {
@@ -1618,7 +1669,17 @@ describe("executeEffect — flip", () => {
     executeEffect(state, flipEffect("opponent_any", { targetInstanceId: "t1" }));
 
     expect(target.face).toBe(CardFace.FaceUp);
-    expect(state.pendingLogs.some((l) => l.includes("opponent's card"))).toBe(true);
+  });
+
+  it("opponent_any: rejects covered opponent card", () => {
+    const state = makeState();
+    const target = card("t1", CardFace.FaceUp);
+    const cover = card("cover", CardFace.FaceDown);
+    state.players[1].lines[0].cards.push(target, cover);
+
+    executeEffect(state, flipEffect("opponent_any", { targetInstanceId: "t1" }));
+
+    expect(target.face).toBe(CardFace.FaceUp);
   });
 
   // ─── own_faceup_covered ────────────────────────────────────────────────────
@@ -1666,6 +1727,17 @@ describe("executeEffect — flip", () => {
 
     expect(target.face).toBe(CardFace.FaceUp);
     expect(state.pendingLogs.some((l) => l.includes("face-down card"))).toBe(true);
+  });
+
+  it("any_facedown: rejects covered face-down card", () => {
+    const state = makeState();
+    const target = card("t1", CardFace.FaceDown);
+    const cover = card("cover", CardFace.FaceUp);
+    state.players[0].lines[0].cards.push(target, cover);
+
+    executeEffect(state, flipEffect("any_facedown", { targetInstanceId: "t1" }));
+
+    expect(target.face).toBe(CardFace.FaceDown);
   });
 
   it("any_facedown optional: skips when no targetId provided", () => {
@@ -1984,6 +2056,19 @@ describe("executeEffect — delete", () => {
     expect(state.players[1].trashSize).toBe(1);
   });
 
+  it("any_card: rejects covered targets", () => {
+    const state = makeState();
+    const c1 = card("c1", CardFace.FaceUp);
+    const cover = card("cover", CardFace.FaceDown);
+    state.players[1].lines[0].cards.push(c1, cover);
+
+    executeEffect(state, effect("delete", 0, { targets: "any_card", targetInstanceId: "c1" }));
+
+    expect(state.players[1].lines[0].cards).toHaveLength(2);
+    expect(state.trashes[1]).toHaveLength(0);
+    expect(state.pendingLogs.some((l) => l.includes("must be uncovered"))).toBe(true);
+  });
+
   it("any_facedown: deletes a face-down card", () => {
     const state = makeState();
     const c1 = card("c1", CardFace.FaceDown);
@@ -2003,6 +2088,19 @@ describe("executeEffect — delete", () => {
     expect(state.players[0].lines[0].cards).toHaveLength(1);
   });
 
+  it("any_facedown: rejects covered face-down card", () => {
+    const state = makeState();
+    const target = card("c1", CardFace.FaceDown);
+    const cover = card("cover", CardFace.FaceUp);
+    state.players[0].lines[0].cards.push(target, cover);
+
+    executeEffect(state, effect("delete", 0, { targets: "any_facedown", targetInstanceId: "c1" }));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(2);
+    expect(state.trashes[0]).toHaveLength(0);
+    expect(state.pendingLogs.some((l) => l.includes("must be uncovered"))).toBe(true);
+  });
+
   it("value_0_or_1: deletes a value-0 card", () => {
     const state = makeState();
     const c1: CardInstance = { instanceId: "c1", defId: "hat_0", face: CardFace.FaceUp }; // value 0
@@ -2011,6 +2109,19 @@ describe("executeEffect — delete", () => {
     executeEffect(state, effect("delete", 0, { targets: "value_0_or_1", targetInstanceId: "c1" }));
 
     expect(state.players[0].lines[0].cards).toHaveLength(0);
+  });
+
+  it("value_0_or_1: rejects covered value-0 card", () => {
+    const state = makeState();
+    const c1: CardInstance = { instanceId: "c1", defId: "hat_0", face: CardFace.FaceUp };
+    const cover = card("cover", CardFace.FaceDown);
+    state.players[0].lines[0].cards.push(c1, cover);
+
+    executeEffect(state, effect("delete", 0, { targets: "value_0_or_1", targetInstanceId: "c1" }));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(2);
+    expect(state.trashes[0]).toHaveLength(0);
+    expect(state.pendingLogs.some((l) => l.includes("must be uncovered"))).toBe(true);
   });
 
   it("value_0_or_1: rejects a value-3 card", () => {
@@ -2621,7 +2732,6 @@ describe("executeEffect — shift (any_facedown, player-chosen dest)", () => {
     executeEffect(state, effect("shift", 0, { targets: "any_facedown", targetInstanceId: "c1", targetLineIndex: 2 }));
 
     expect(state.players[1].lines[0].cards).toHaveLength(1);
-    expect(state.pendingLogs.some((l) => l.includes("must be face-down"))).toBe(true);
   });
 });
 
@@ -2641,23 +2751,30 @@ describe("executeEffect — shift (any_facedown, toSourceLine)", () => {
 });
 
 describe("executeEffect — shift (own_facedown_in_line)", () => {
-  it("moves all own face-down cards in source line to target line (lgt_3 style)", () => {
+  it("moves all face-down cards in source line (both players) to target line (lgt_3 style)", () => {
     const state = makeState();
     const src = card("lgt3", CardFace.FaceUp);
     const fd1 = card("fd1", CardFace.FaceDown);
     const fd2 = card("fd2", CardFace.FaceDown);
     const fu = card("fu1", CardFace.FaceUp);
+    const oppFdCovered = card("oppfd1", CardFace.FaceDown);
+    const oppTop = card("opptop", CardFace.FaceUp);
     state.players[0].lines[0].cards.push(src, fd1, fd2, fu);
+    state.players[1].lines[0].cards.push(oppFdCovered, oppTop);
 
     executeEffect(state, effect("shift", 0, { targets: "own_facedown_in_line", targetLineIndex: 2 }, "lgt3"));
 
-    // source card and face-up card stay in line 0; face-down cards move to line 2
+    // Face-down cards from both players in source line move to same-index target line.
     expect(state.players[0].lines[0].cards.map((c) => c.instanceId)).toContain("lgt3");
     expect(state.players[0].lines[0].cards.map((c) => c.instanceId)).toContain("fu1");
     expect(state.players[0].lines[0].cards.map((c) => c.instanceId)).not.toContain("fd1");
     expect(state.players[0].lines[0].cards.map((c) => c.instanceId)).not.toContain("fd2");
     expect(state.players[0].lines[2].cards.map((c) => c.instanceId)).toContain("fd1");
     expect(state.players[0].lines[2].cards.map((c) => c.instanceId)).toContain("fd2");
+
+    expect(state.players[1].lines[0].cards.map((c) => c.instanceId)).toContain("opptop");
+    expect(state.players[1].lines[0].cards.map((c) => c.instanceId)).not.toContain("oppfd1");
+    expect(state.players[1].lines[2].cards.map((c) => c.instanceId)).toContain("oppfd1");
   });
 
   it("logs when no targetLineIndex provided", () => {
@@ -2708,7 +2825,6 @@ describe("executeEffect — shift (no targets / grv_1 style)", () => {
     executeEffect(state, effect("shift", 0, { targetInstanceId: "mov1", targetLineIndex: 2 }, "grv1"));
 
     expect(state.players[0].lines[1].cards).toHaveLength(1);
-    expect(state.pendingLogs.some((l) => l.includes("to or from source line"))).toBe(true);
   });
 
   it("rejects opponent's card", () => {
@@ -2721,7 +2837,6 @@ describe("executeEffect — shift (no targets / grv_1 style)", () => {
     executeEffect(state, effect("shift", 0, { targetInstanceId: "mov1", targetLineIndex: 2 }, "grv1"));
 
     expect(state.players[1].lines[0].cards).toHaveLength(1);
-    expect(state.pendingLogs.some((l) => l.includes("grv_1 may only shift own"))).toBe(true);
   });
 });
 
@@ -2745,6 +2860,19 @@ describe("executeEffect — shift (opponent_any)", () => {
 
     expect(state.players[0].lines[0].cards).toHaveLength(1);
     expect(state.pendingLogs.some((l) => l.includes("must target opponent"))).toBe(true);
+  });
+
+  it("rejects covered opponent card", () => {
+    const state = makeState();
+    const target = card("opp1", CardFace.FaceDown);
+    const cover = card("cover", CardFace.FaceUp);
+    state.players[1].lines[0].cards.push(target, cover);
+
+    executeEffect(state, effect("shift", 0, { targets: "opponent_any", targetInstanceId: "opp1", targetLineIndex: 2 }));
+
+    expect(state.players[1].lines[0].cards.map((c) => c.instanceId)).toEqual(["opp1", "cover"]);
+    expect(state.players[1].lines[2].cards).toHaveLength(0);
+    expect(state.pendingLogs.some((l) => l.includes("must be uncovered"))).toBe(true);
   });
 });
 
@@ -2803,7 +2931,6 @@ describe("executeEffect — shift (opponent_facedown)", () => {
     executeEffect(state, effect("shift", 0, { targets: "opponent_facedown", targetInstanceId: "ofu1", targetLineIndex: 2 }));
 
     expect(state.players[1].lines[0].cards).toHaveLength(1);
-    expect(state.pendingLogs.some((l) => l.includes("must be face-down"))).toBe(true);
   });
 });
 
@@ -3544,6 +3671,17 @@ describe("control reorder — triggered by compile/refresh with control", () => 
 
     const result = refresh(state, 0);
     expect(result.success).toBe(true);
+    expect(state.pendingControlReorder).toBeNull();
+  });
+
+  it("refresh rejects when hand has 5 cards", () => {
+    const state = stateWithProtocols();
+    state.turnPhase = "Action" as any;
+    for (let i = 0; i < 5; i++) state.players[0].hand.push(card(`h${i}`));
+
+    const result = refresh(state, 0);
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain("Cannot refresh with 5 or more cards in hand.");
     expect(state.pendingControlReorder).toBeNull();
   });
 

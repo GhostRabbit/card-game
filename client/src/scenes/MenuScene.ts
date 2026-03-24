@@ -21,6 +21,37 @@ export class MenuScene extends Phaser.Scene {
     ]);
     let selectedVariant: DraftVariant = DraftVariant.Limited9;
 
+    const theme = {
+      bgTop: 0x060912,
+      bgBottom: 0x0b1322,
+      panel: 0x0d1626,
+      panelStroke: 0x2f5e7c,
+      accentPrimary: 0x1ac7a1,
+      accentSecondary: 0x4fb3ff,
+      textMain: "#eaf4ff",
+      textMuted: "#89a6bf",
+      inputBg: 0x111f31,
+      inputStrokeIdle: 0x356284,
+      inputStrokeActive: 0x39f0c9,
+    };
+
+    const login = {
+      panelCx: width / 2,
+      panelCy: Math.round(height * 0.37),
+      panelW: 760,
+      panelH: 300,
+      titleY: Math.round(height * 0.10),
+      subtitleY: Math.round(height * 0.17),
+      statusY: Math.round(height * 0.25),
+      userY: Math.round(height * 0.33),
+      codeY: Math.round(height * 0.42),
+      buttonY: Math.round(height * 0.52),
+      labelX: width / 2 - 205,
+      inputX: width / 2 + 70,
+      inputW: 360,
+      inputH: 44,
+    };
+
     const currentLobbySettings = (): LobbySettings => ({
       selectedProtocolSets: [
         ProtocolSet.MainUnit1,
@@ -31,26 +62,43 @@ export class MenuScene extends Phaser.Scene {
       draftVariant: selectedVariant,
     });
 
-    // Title
-    this.add.text(width / 2, height * 0.12, "COMPILE", {
+    // Atmospheric background + login panel
+    this.add.rectangle(width / 2, height / 2, width, height, theme.bgBottom);
+    this.add.circle(width * 0.2, height * 0.18, 220, 0x12314f, 0.22);
+    this.add.circle(width * 0.82, height * 0.22, 200, 0x0b5f63, 0.17);
+    this.add.rectangle(width / 2, height / 2, width, 220, theme.bgTop, 0.35);
+
+    const loginPanel = this.add.rectangle(login.panelCx, login.panelCy, login.panelW, login.panelH, theme.panel, 0.9)
+      .setStrokeStyle(2, theme.panelStroke);
+    this.add.rectangle(login.panelCx, login.panelCy - login.panelH / 2 + 28, login.panelW - 6, 48, 0x0f2233, 0.95)
+      .setStrokeStyle(1, 0x2a7a8f);
+    this.add.rectangle(login.panelCx - login.panelW / 2 + 4, login.panelCy, 4, login.panelH - 8, theme.accentPrimary, 0.9);
+    this.add.rectangle(login.panelCx + login.panelW / 2 - 4, login.panelCy, 4, login.panelH - 8, theme.accentSecondary, 0.9);
+    loginPanel.setAlpha(0.95);
+
+    this.add.text(width / 2, login.titleY, "COMPILE", {
       fontSize: "64px",
       fontFamily: "monospace",
-      color: "#00ffcc",
+      color: "#cffff0",
       fontStyle: "bold",
+      stroke: "#05181a",
+      strokeThickness: 6,
     }).setOrigin(0.5);
-    this.add.text(width / 2, height * 0.22, "A Two-Player Card Game", {
+    this.add.text(width / 2, login.subtitleY, "A Two-Player Card Game", {
       fontSize: "20px",
       fontFamily: "monospace",
-      color: "#6688aa",
+      color: "#95b7d8",
+      fontStyle: "bold",
     }).setOrigin(0.5);
 
     // Username
-    this.add.text(width / 2 - 230, height * 0.36, "USERNAME", {
-      fontSize: "14px", fontFamily: "monospace", color: "#aaaacc",
+    this.add.text(login.labelX, login.userY, "USERNAME", {
+      fontSize: "14px", fontFamily: "monospace", color: theme.textMain, fontStyle: "bold",
     }).setOrigin(0.5);
-    const usernameBox = this.add.rectangle(width / 2 + 30, height * 0.36, 320, 40, 0x112233).setStrokeStyle(1, 0x3366aa);
-    const usernameText = this.add.text(width / 2 + 30, height * 0.36, "", {
-      fontSize: "18px", fontFamily: "monospace", color: "#ffffff",
+    const usernameBox = this.add.rectangle(login.inputX, login.userY, login.inputW, login.inputH, theme.inputBg)
+      .setStrokeStyle(2, theme.inputStrokeIdle);
+    const usernameText = this.add.text(login.inputX, login.userY, "", {
+      fontSize: "18px", fontFamily: "monospace", color: "#ffffff", fontStyle: "bold",
     }).setOrigin(0.5);
     let username = "";
 
@@ -60,20 +108,21 @@ export class MenuScene extends Phaser.Scene {
     }
 
     // Room Code (for joining)
-    this.add.text(width / 2 - 230, height * 0.44, "ROOM CODE", {
-      fontSize: "14px", fontFamily: "monospace", color: "#aaaacc",
+    this.add.text(login.labelX, login.codeY, "ROOM CODE", {
+      fontSize: "14px", fontFamily: "monospace", color: theme.textMain, fontStyle: "bold",
     }).setOrigin(0.5);
-    const codeBox = this.add.rectangle(width / 2 + 30, height * 0.44, 320, 40, 0x112233).setStrokeStyle(1, 0x3366aa);
-    const codeText = this.add.text(width / 2 + 30, height * 0.44, "", {
-      fontSize: "18px", fontFamily: "monospace", color: "#ffdd88",
+    const codeBox = this.add.rectangle(login.inputX, login.codeY, login.inputW, login.inputH, theme.inputBg)
+      .setStrokeStyle(2, theme.inputStrokeIdle);
+    const codeText = this.add.text(login.inputX, login.codeY, "", {
+      fontSize: "18px", fontFamily: "monospace", color: "#ffe3a0", fontStyle: "bold",
     }).setOrigin(0.5);
     let roomInput = "";
     let activeInput: "username" | "code" = "username";
 
     // Highlight active input
     const updateHighlight = () => {
-      usernameBox.setStrokeStyle(1, activeInput === "username" ? 0x00ffcc : 0x3366aa);
-      codeBox.setStrokeStyle(1, activeInput === "code" ? 0x00ffcc : 0x3366aa);
+      usernameBox.setStrokeStyle(2, activeInput === "username" ? theme.inputStrokeActive : theme.inputStrokeIdle);
+      codeBox.setStrokeStyle(2, activeInput === "code" ? theme.inputStrokeActive : theme.inputStrokeIdle);
     };
     usernameBox.setInteractive().on("pointerdown", () => { activeInput = "username"; updateHighlight(); });
     codeBox.setInteractive().on("pointerdown", () => { activeInput = "code"; updateHighlight(); });
@@ -121,17 +170,17 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Status text
-    const statusText = this.add.text(width / 2, height * 0.30, "", {
-      fontSize: "16px", fontFamily: "monospace", color: "#ff6666",
+    const statusText = this.add.text(width / 2, login.statusY, "", {
+      fontSize: "16px", fontFamily: "monospace", color: "#ff8f80", fontStyle: "bold",
     }).setOrigin(0.5);
 
     // Copy button for room code — positioned to the right of code textfield
-    const copyCodeBtn = this.add.text(width / 2 + 180, height * 0.44, "⧉", {
-      fontSize: "20px", fontFamily: "monospace", color: "#00ffcc",
-      backgroundColor: "#112233", padding: { x: 6, y: 4 },
+    const copyCodeBtn = this.add.text(width / 2 + 210, login.codeY, "⧉", {
+      fontSize: "20px", fontFamily: "monospace", color: "#c3fff1",
+      backgroundColor: "#163044", padding: { x: 7, y: 5 },
     }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
     copyCodeBtn.on("pointerover", () => copyCodeBtn.setColor("#ffffff"));
-    copyCodeBtn.on("pointerout", () => copyCodeBtn.setColor("#00ffcc"));
+    copyCodeBtn.on("pointerout", () => copyCodeBtn.setColor("#c3fff1"));
     copyCodeBtn.on("pointerdown", () => {
       if (!generatedRoomCode) return;
       navigator.clipboard.writeText(generatedRoomCode).then(() => {
@@ -141,8 +190,8 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Protocol set selector
-    this.add.text(width / 2, height * 0.66, "AVAILABLE PROTOCOL SETS", {
-      fontSize: "12px", fontFamily: "monospace", color: "#556677",
+    this.add.text(width / 2, height * 0.64, "AVAILABLE PROTOCOL SETS", {
+      fontSize: "12px", fontFamily: "monospace", color: theme.textMuted,
     }).setOrigin(0.5);
     const setItems: { setId: ProtocolSet; label: string }[] = [
       { setId: ProtocolSet.MainUnit1, label: "Main Unit 1" },
@@ -167,10 +216,10 @@ export class MenuScene extends Phaser.Scene {
 
     setItems.forEach(({ setId, label }, i) => {
       const x = setStartX + i * (setW + setGap);
-      const box = this.add.rectangle(x, height * 0.70, setW, setH, 0x0a1520)
+      const box = this.add.rectangle(x, height * 0.68, setW, setH, 0x0a1520)
         .setStrokeStyle(1, 0x223344)
         .setInteractive({ useHandCursor: true });
-      const txt = this.add.text(x, height * 0.70, label, {
+      const txt = this.add.text(x, height * 0.68, label, {
         fontSize: "11px", fontFamily: "monospace", color: "#445566",
       }).setOrigin(0.5);
 
@@ -200,8 +249,8 @@ export class MenuScene extends Phaser.Scene {
     refreshSetButtons();
 
     // Draft variant selector
-    this.add.text(width / 2, height * 0.78, "DRAFT VARIANT", {
-      fontSize: "12px", fontFamily: "monospace", color: "#556677",
+    this.add.text(width / 2, height * 0.75, "DRAFT VARIANT", {
+      fontSize: "12px", fontFamily: "monospace", color: theme.textMuted,
     }).setOrigin(0.5);
     const variantItems: { variant: DraftVariant; label: string; desc: string }[] = [
       { variant: DraftVariant.Full, label: "Full", desc: "All selected sets are available in the draft." },
@@ -212,7 +261,7 @@ export class MenuScene extends Phaser.Scene {
     const variantLabels: Phaser.GameObjects.Text[] = [];
     const variantDescs: Phaser.GameObjects.Text[] = [];
     let draftVariantLocked = false;
-    const variantY0 = height * 0.83;
+    const variantY0 = height * 0.79;
     const variantGapY = 0.07;
 
     const refreshVariantButtons = () => {
@@ -258,15 +307,22 @@ export class MenuScene extends Phaser.Scene {
     refreshVariantButtons();
 
     // Buttons
-    const btnStyle = { fontSize: "18px", fontFamily: "monospace", color: "#0a0a0f" };
+    const btnStyle = { fontSize: "18px", fontFamily: "monospace", color: "#041114", fontStyle: "bold" };
 
-    const createBtn = this.add.rectangle(width / 2 - 100, height * 0.58, 180, 44, 0x00ffcc)
+    const createBtn = this.add.rectangle(width / 2 - 110, login.buttonY, 200, 48, 0x26d7af)
       .setInteractive({ useHandCursor: true });
-    this.add.text(width / 2 - 100, height * 0.58, "CREATE ROOM", btnStyle).setOrigin(0.5);
+    createBtn.setStrokeStyle(2, 0x8fffe7);
+    this.add.text(width / 2 - 110, login.buttonY, "CREATE ROOM", btnStyle).setOrigin(0.5);
 
-    const joinBtn = this.add.rectangle(width / 2 + 100, height * 0.58, 180, 44, 0x3399ff)
+    const joinBtn = this.add.rectangle(width / 2 + 110, login.buttonY, 200, 48, 0x49a8ff)
       .setInteractive({ useHandCursor: true });
-    this.add.text(width / 2 + 100, height * 0.58, "JOIN ROOM", btnStyle).setOrigin(0.5);
+    joinBtn.setStrokeStyle(2, 0x9fd2ff);
+    this.add.text(width / 2 + 110, login.buttonY, "JOIN ROOM", btnStyle).setOrigin(0.5);
+
+    createBtn.on("pointerover", () => createBtn.setFillStyle(0x36e9c1));
+    createBtn.on("pointerout", () => createBtn.setFillStyle(0x26d7af));
+    joinBtn.on("pointerover", () => joinBtn.setFillStyle(0x62bbff));
+    joinBtn.on("pointerout", () => joinBtn.setFillStyle(0x49a8ff));
 
     createBtn.on("pointerdown", () => {
       if (!username.trim()) { statusText.setText("Enter a username first."); return; }

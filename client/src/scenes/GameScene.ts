@@ -151,8 +151,9 @@ export class GameScene extends Phaser.Scene {
     const stripH = 38;    // height of the mid-strip between opponent and own zones
     const gap    = 14;    // gap between a zone edge and the strip edge
     const hudH   = 85;    // vertical space consumed by the top HUD
-    const padL   = 50;    // left padding before the first column centre
+    const padL   = 20;    // left padding before the first column centre (shift board west)
     const pitch  = 330;   // horizontal distance between column centres
+    const lineToFocusGutter = 120; // reserved lane between lines and focus area (control token gutter)
     const padR   = 20;    // right padding
 
     // ── Derived vertical positions ──────────────────────────────────────────
@@ -164,9 +165,9 @@ export class GameScene extends Phaser.Scene {
     const col0   = padL + zoneW / 2;
     const lineCx: [number, number, number] = [col0, col0 + pitch, col0 + pitch * 2];
 
-    // Focus panel — immediately right of the last line column
+    // Focus panel — offset right to leave a gutter between lines and zoom/focus panel
     const focusPanelW = 240;
-    const focusPanelCx = lineCx[2] + zoneW / 2 + 10 + focusPanelW / 2;
+    const focusPanelCx = lineCx[2] + zoneW / 2 + lineToFocusGutter + focusPanelW / 2;
 
     // Pile sits immediately right of the focus panel with minimal gap
     const pileCx = focusPanelCx + focusPanelW / 2 + 10 + pileW / 2;
@@ -305,7 +306,7 @@ export class GameScene extends Phaser.Scene {
     const confirmStrokeNum = effectAccentNum;
     const confirmTextColor = toCssHex(effectAccentNum);
 
-    const myTurn = this.isMyTurn();
+    const myTurn = this.view.isActivePlayer;
     const isCompileChoice = this.view.isActivePlayer && this.turnPhase === TurnPhase.CompileChoice;
     const isEffectResolution = this.turnPhase === TurnPhase.EffectResolution;
 
@@ -633,8 +634,10 @@ export class GameScene extends Phaser.Scene {
       const oppName = PROTOCOL_NAMES_CLIENT.get(oppProtoId) ?? oppProtoId;
       const indicator = ownVal > oppVal ? "▲" : ownVal < oppVal ? "▼" : "=";
       const scoreColor = ownVal > oppVal ? "#44ff99" : ownVal < oppVal ? "#ff6655" : "#99aacc";
-      const myProtoColor  = PROTOCOL_ACCENT_COLORS.get(myProtoId)  ?? 0x4488cc;
-      const oppProtoColor = PROTOCOL_ACCENT_COLORS.get(oppProtoId) ?? 0x4488cc;
+      const myProtoColor  = PROTOCOL_COLORS.get(myProtoId)  ?? 0x1a3a5c;
+      const oppProtoColor = PROTOCOL_COLORS.get(oppProtoId) ?? 0x1a3a5c;
+      const myProtoAccent = PROTOCOL_ACCENT_COLORS.get(myProtoId) ?? 0x4488cc;
+      const oppProtoAccent = PROTOCOL_ACCENT_COLORS.get(oppProtoId) ?? 0x4488cc;
       const myProtoComp = this.complementaryProtoColor(myProtoId);
       const oppProtoComp = this.complementaryProtoColor(oppProtoId);
 
@@ -649,13 +652,33 @@ export class GameScene extends Phaser.Scene {
       const thirdW = zoneW / 3;
       const leftCx = rx - zoneW / 2 + thirdW / 2;
       const rightCx = rx + zoneW / 2 - thirdW / 2;
+      const protoBlockW = thirdW - 6;
+      const protoBlockH = L.stripH - 6;
+      const protoRadius = 6;
+      
+      const createRoundedProtoBlock = (
+        blockCx: number,
+        fillColor: number,
+        borderColor: number,
+      ) => {
+        const g = this.add.graphics();
+        g.fillStyle(fillColor, 0.9);
+        g.lineStyle(3, borderColor, 1);
+        g.fillRoundedRect(blockCx - protoBlockW / 2, midY - protoBlockH / 2, protoBlockW, protoBlockH, protoRadius);
+        g.strokeRoundedRect(blockCx - protoBlockW / 2, midY - protoBlockH / 2, protoBlockW, protoBlockH, protoRadius);
+        g.setAlpha(0.9);
+
+        const hit = this.add.rectangle(blockCx, midY, protoBlockW, protoBlockH, 0x000000, 0)
+          .setInteractive({ useHandCursor: true });
+        hit.on("pointerover", () => { g.setAlpha(1); this.showFocusProtocol(li); });
+        hit.on("pointerout", () => { g.setAlpha(0.9); this.showFocusCard(null); });
+
+        this.boardGroup.add(g, true);
+        this.boardGroup.add(hit, true);
+      };
 
       // Own protocol block (left third) — full rectangle is interactive
-      const myProtoRect = this.add.rectangle(leftCx, midY, thirdW, L.stripH, myProtoColor)
-        .setAlpha(0.9).setInteractive({ useHandCursor: true });
-      myProtoRect.on("pointerover", () => { myProtoRect.setAlpha(1);   this.showFocusProtocol(li); });
-      myProtoRect.on("pointerout",  () => { myProtoRect.setAlpha(0.9); this.showFocusCard(null); });
-      this.boardGroup.add(myProtoRect, true);
+      createRoundedProtoBlock(leftCx, myProtoColor, myProtoAccent);
       this.boardGroup.add(
         this.add.text(leftCx, midY, (myCom ? "\u2713 " : "") + myName, {
           fontSize: "11px", fontFamily: "monospace", fontStyle: "bold",
@@ -676,11 +699,7 @@ export class GameScene extends Phaser.Scene {
       );
 
       // Opponent protocol block (right third) — full rectangle is interactive
-      const oppProtoRect = this.add.rectangle(rightCx, midY, thirdW, L.stripH, oppProtoColor)
-        .setAlpha(0.9).setInteractive({ useHandCursor: true });
-      oppProtoRect.on("pointerover", () => { oppProtoRect.setAlpha(1);   this.showFocusProtocol(li); });
-      oppProtoRect.on("pointerout",  () => { oppProtoRect.setAlpha(0.9); this.showFocusCard(null); });
-      this.boardGroup.add(oppProtoRect, true);
+      createRoundedProtoBlock(rightCx, oppProtoColor, oppProtoAccent);
       this.boardGroup.add(
         this.add.text(rightCx, midY, (oppCom ? "\u2713 " : "") + oppName, {
           fontSize: "11px", fontFamily: "monospace", fontStyle: "bold",
@@ -693,8 +712,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ── Discard / draw pile column ──────────────────────────────────────────
-    this.renderPile(this.view.opponentTrash, this.view.opponentDeckSize, L.pileCx, oppCy, L.pileW, zoneH, "OPP DISCARD", "#cc7744", this.view.opponentHandSize, -42);
-    this.renderPile(this.view.trash, this.view.deckSize, L.pileCx, ownCy, L.pileW, zoneH, "MY DISCARD", "#5599cc", undefined, 42);
+    this.renderPile(this.view.opponentTrash, this.view.opponentDeckSize, L.pileCx, oppCy, L.pileW, zoneH, "OPP DISCARD", "#cc7744", this.view.opponentHandSize);
+    this.renderPile(this.view.trash, this.view.deckSize, L.pileCx, ownCy, L.pileW, zoneH, "MY DISCARD", "#5599cc", undefined);
 
     // ── Control token (between pile boxes) ─────────────────────────────────
     const iHave = this.view.hasControl;
@@ -702,15 +721,15 @@ export class GameScene extends Phaser.Scene {
     const tokenActive = iHave || oppHas;
     const tokenSize = 56;
     const tokenMargin = 8;
-    // Left-corner anchor inside each pile box.
-    const cornerTokenX = L.pileCx - L.pileW / 2 + tokenSize / 2 + tokenMargin;
-    // Neutral stays between draw boxes on the left lane.
-    const neutralTokenX = L.pileCx - L.pileW / 2 + 44;
+    // Token sits in the dedicated gutter between line columns and focus panel.
+    const gutterLeft = L.lineCx[2] + zoneW / 2;
+    const gutterRight = L.focusPanelCx - L.focusPanelW / 2;
+    const gutterTokenX = Math.round((gutterLeft + gutterRight) / 2);
     const neutralTokenY = (oppCy + ownCy) / 2;
-    // Controlled positions: opponent in lower-left of top box; current player in top-left of bottom box.
-    const oppControlledY = oppCy + zoneH / 2 - tokenSize / 2 - tokenMargin;
-    const myControlledY = ownCy - zoneH / 2 + tokenSize / 2 + tokenMargin;
-    const tokenX = iHave || oppHas ? cornerTokenX : neutralTokenX;
+    // Controlled positions: token moves away from mid toward the owning player's zone.
+    const oppControlledY = oppCy - zoneH / 2 + tokenSize / 2 + tokenMargin;
+    const myControlledY = ownCy + zoneH / 2 - tokenSize / 2 - tokenMargin;
+    const tokenX = gutterTokenX;
     const tokenY = iHave ? myControlledY : oppHas ? oppControlledY : neutralTokenY;
 
     // Compact token slot around the token only.
@@ -764,8 +783,7 @@ export class GameScene extends Phaser.Scene {
     pileW: number, pileH: number,
     label: string,
     labelColor: string,
-    handSize?: number,
-    drawYOffset = 0
+    handSize?: number
   ): void {
     const topY = cy - pileH / 2;
     const leftX = cx - pileW / 2 + 44;
@@ -800,20 +818,34 @@ export class GameScene extends Phaser.Scene {
     this.boardGroup.add(
       this.add.rectangle(cx - 18, cy, 1, pileH - 12, 0x223344), true);
 
-    // Draw counter — on left side of discard stack
+    // Draw deck (left lane): compact face-down stack with a shallow vertical buildup.
+    const deckScale = 0.42;
+    const deckStepPx = 4;
+    const visibleDeckCards = Math.min(deckSize, 10);
+    const deckTopCardCy = cy + (isMine ? -8 : 12);
+    for (let i = 0; i < visibleDeckCards; i++) {
+      const hiddenCard: CardView = {
+        instanceId: `${isMine ? "my" : "opp"}-deck-${i}`,
+        hidden: true,
+      };
+      const isCovered = i < visibleDeckCards - 1;
+      const cardCy = deckTopCardCy - (visibleDeckCards - 1 - i) * deckStepPx;
+      const sprite = new CardSprite(this, leftX, cardCy, hiddenCard, CLIENT_CARD_DEFS, isCovered);
+      sprite.setScale(deckScale);
+      this.boardGroup.add(sprite, true);
+    }
+
+    const deckHalfH = (CardSprite.HEIGHT * deckScale) / 2;
+    const deckTop = deckTopCardCy - (visibleDeckCards - 1) * deckStepPx - deckHalfH;
+    const deckBottom = deckTopCardCy + deckHalfH;
+    const drawCountY = isMine ? deckBottom + 12 : deckTop - 12;
     this.boardGroup.add(
-      this.add.text(leftX, cy - 16 + drawYOffset, String(deckSize), {
-        fontSize: "40px", fontFamily: "monospace", color: "#4499cc", fontStyle: "bold",
-      }).setOrigin(0.5)
+      this.add.text(leftX, drawCountY, String(deckSize), {
+        fontSize: "34px", fontFamily: "monospace", color: "#64b6ff", fontStyle: "bold",
+      }).setOrigin(0.5, isMine ? 0 : 1)
         .setName(isMine ? "draw-pile-count" : "opponent-draw-pile-count")
         .setData("testid", isMine ? "draw-pile-count" : "opponent-draw-pile-count")
         .setData("deckSize", deckSize), true);
-    this.boardGroup.add(
-      this.add.text(leftX, cy + 20 + drawYOffset, "draw", {
-        fontSize: "9px", fontFamily: "monospace", color: "#2a5577",
-      }).setOrigin(0.5, 0)
-        .setName(isMine ? "draw-pile-label" : "opponent-draw-pile-label")
-        .setData("testid", isMine ? "draw-pile-label" : "opponent-draw-pile-label"), true);
 
     // Discard card stack (right side gets more vertical room)
     if (cards.length === 0) {
@@ -1224,25 +1256,27 @@ export class GameScene extends Phaser.Scene {
     // Hidden (opponent face-down) cards: selectable for modes that allow face-down or any opponent
     if ("hidden" in card) {
       if (!isOpp) return false;
-      return spec.boardMode === "any_card" || spec.boardMode === "any_facedown" ||
-             spec.boardMode === "opponent_any" || spec.boardMode === "opponent_facedown" ||
-             spec.boardMode === "opponent_covered";
+      return (spec.boardMode === "any_card" || spec.boardMode === "any_facedown" ||
+              spec.boardMode === "opponent_any" || spec.boardMode === "opponent_facedown" ||
+              spec.boardMode === "opponent_covered") &&
+        (spec.boardMode === "opponent_covered" ? !isTopCard : isTopCard);
     }
 
     const c   = card as CardInstance;
     const def = CLIENT_CARD_DEFS.get(c.defId);
 
     switch (spec.boardMode) {
-      case "any_card":           return true;
-      case "any_facedown":       return c.face === CardFace.FaceDown;
+      case "any_card":           return isTopCard;
+      case "any_facedown":       return c.face === CardFace.FaceDown && isTopCard;
       case "any_uncovered":      return isTopCard;
-      case "opponent_any":       return isOpp;
+      case "opponent_any":       return isOpp && isTopCard;
       case "opponent_covered":   return isOpp && !isTopCard;
-      case "opponent_facedown":  return isOpp && c.face === CardFace.FaceDown;
-      case "own_any":            return isMine;
-      case "own_others":         return isMine && c.instanceId !== effect.sourceInstanceId;
+      case "opponent_facedown":  return isOpp && c.face === CardFace.FaceDown && isTopCard;
+      case "own_any":            return isMine && isTopCard;
+      case "own_others":         return isMine && c.instanceId !== effect.sourceInstanceId && isTopCard;
       case "own_covered_in_line":return isMine && !isTopCard;
       case "value_0_or_1": {
+        if (!isTopCard) return false;
         const val = c.face === CardFace.FaceDown ? 2 : (def?.value ?? 0);
         return val <= 1;
       }
@@ -1445,9 +1479,12 @@ export class GameScene extends Phaser.Scene {
     onPick: (lineIndex: number) => void,
     isLineAllowed?: (lineIndex: number) => boolean
   ): void {
+    const linePickY = 590;
+    const linePickW = 180;
+    const linePickH = 38;
     const makeBtn = (cx: number, y: number, label: string, lineIdx: number, borderColor: number, textColor: string) => {
       const allowed = isLineAllowed ? isLineAllowed(lineIdx) : true;
-      const btn = this.add.rectangle(cx, y, 140, 26, allowed ? 0x001a0a : 0x131313)
+      const btn = this.add.rectangle(cx, y, linePickW, linePickH, allowed ? 0x001a0a : 0x131313)
         .setStrokeStyle(2, borderColor)
         .setName(`line-pick-button-${lineIdx}`)
         .setData("testid", `line-pick-button-${lineIdx}`);
@@ -1474,21 +1511,21 @@ export class GameScene extends Phaser.Scene {
 
     if (scope === "own" || scope === "any") {
       for (let li = 0; li < 3; li++)
-        makeBtn(lineCx[li], 88, ownName(li), li, 0x00ff88, ownColor(li));
+        makeBtn(lineCx[li], linePickY, ownName(li), li, 0x00ff88, ownColor(li));
     } else if (scope === "both") {
       // Full-lane pick: one button per line, labelled with both protocols
       for (let li = 0; li < 3; li++) {
         const label = `${ownName(li)} vs ${oppName(li)}`;
-        makeBtn(lineCx[li], 88, label, li, 0xffcc44, "#ffffcc");
+        makeBtn(lineCx[li], linePickY, label, li, 0xffcc44, "#ffffcc");
       }
     } else if (scope === "opponent") {
       for (let li = 0; li < 3; li++)
-        makeBtn(lineCx[li], 88, oppName(li), li, 0xff8844, oppColor(li));
+        makeBtn(lineCx[li], linePickY, oppName(li), li, 0xff8844, oppColor(li));
     } else if (scope === "encoded") {
       for (let li = 0; li < 3; li++)
-        makeBtn(lineCx[li], 82, `Own: ${ownName(li)}`, li, 0x00ff88, ownColor(li));
+        makeBtn(lineCx[li], linePickY - 24, `Own: ${ownName(li)}`, li, 0x00ff88, ownColor(li));
       for (let li = 0; li < 3; li++)
-        makeBtn(lineCx[li], 112, `Opp: ${oppName(li)}`, li + 3, 0xff8844, oppColor(li));
+        makeBtn(lineCx[li], linePickY + 24, `Opp: ${oppName(li)}`, li + 3, 0xff8844, oppColor(li));
     }
   }
 
