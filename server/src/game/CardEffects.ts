@@ -510,6 +510,35 @@ export function executeEffect(
     }
 
     case "return": {
+      const targets = payload.targets as string | undefined;
+      const targetLineIndex = payload.targetLineIndex as number | undefined;
+
+      // wtr_3: Return all cards with value 2 in one selected line.
+      if (targets === "line_value_2") {
+        if (targetLineIndex === undefined || targetLineIndex < 0 || targetLineIndex > 2) {
+          log("return line_value_2: no valid targetLineIndex provided");
+          break;
+        }
+
+        let returnedCount = 0;
+        for (let pi = 0 as 0 | 1; pi <= 1; pi = (pi + 1) as 0 | 1) {
+          const line = state.players[pi].lines[targetLineIndex];
+          for (let idx = line.cards.length - 1; idx >= 0; idx--) {
+            const c = line.cards[idx];
+            const def = CARD_MAP.get(c.defId);
+            const val = c.face === CardFace.FaceDown ? FACE_DOWN_VALUE : (def?.value ?? 0);
+            if (val !== 2) continue;
+
+            const [returned] = line.cards.splice(idx, 1);
+            returned.face = CardFace.FaceUp;
+            state.players[ownerIndex].hand.push(returned);
+            returnedCount++;
+          }
+        }
+        log(`return line_value_2: returned ${returnedCount} card(s) from line ${targetLineIndex}`);
+        break;
+      }
+
       // Move a specific card from any line back to the owner's hand.
       // The player selects the card; the resolver receives its instanceId in payload.
       const targetId = payload.targetInstanceId as string | undefined;

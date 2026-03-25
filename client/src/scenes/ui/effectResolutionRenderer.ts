@@ -352,7 +352,7 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
         }
       }
     } else if (spec.needsLine) {
-      const hint = ctx.state.getEffectBoardTargetId() ? "Card selected — choose a destination line:" : "Choose a destination line:";
+      const hint = ctx.state.getEffectBoardTargetId() ? "Card selected — choose a destination line:" : "Choose a line:";
       addHint(ctx, hint);
 
       const isGravity1Shift =

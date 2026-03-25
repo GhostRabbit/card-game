@@ -249,7 +249,6 @@ export const COMMAND_CARDS: CommandCardDef[] = [
   { id: "psy_3", name: "Psychic", value: 3, protocolId: "proto_psy",
     effects: [
       { trigger: "immediate", type: "opponent_discard", description: "Your opponent discards 1 card.", payload: { amount: 1 } },
-      { trigger: "immediate", type: "shift", description: "Shift 1 of their cards.", payload: { targets: "opponent_any" } },
     ] },
   { id: "psy_4", name: "Psychic", value: 4, protocolId: "proto_psy",
     effects: [{ trigger: "end", type: "return_opp_flip_self", description: "You may return 1 of your opponent's cards. If you do, flip this card.", payload: {} }] },

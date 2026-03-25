@@ -1211,6 +1211,7 @@ export class GameScene extends Phaser.Scene {
           targets === "any_facedown"       ? "any_facedown"      :
           targets === "any_uncovered"      ? "any_uncovered"     :
           targets === "opponent_any"       ? "opponent_any"      :
+          targets === "any_other"          ? "any_other"         :
           targets === "own_covered_in_line"? "own_covered_in_line" :
                                              "any_card";
         return { boardMode, handPick: false, needsLine: false, lineScope: null, isOptional: optional ?? false, isAutoExecute: false };
@@ -1226,6 +1227,9 @@ export class GameScene extends Phaser.Scene {
         return { boardMode, handPick: false, needsLine: false, lineScope: null, isOptional: false, isAutoExecute: false };
       }
       case "return":
+        if (targets === "line_value_2") {
+          return { boardMode: null, handPick: false, needsLine: true, lineScope: "both", isOptional: false, isAutoExecute: false };
+        }
         return { boardMode: "any_card", handPick: false, needsLine: false, lineScope: null, isOptional: false, isAutoExecute: false };
       case "reveal_own_hand":
       case "exchange_hand":
@@ -1256,7 +1260,8 @@ export class GameScene extends Phaser.Scene {
     // Hidden (opponent face-down) cards: selectable for modes that allow face-down or any opponent
     if ("hidden" in card) {
       if (!isOpp) return false;
-      return (spec.boardMode === "any_card" || spec.boardMode === "any_facedown" ||
+      return (spec.boardMode === "any_card" || spec.boardMode === "any_other" ||
+              spec.boardMode === "any_facedown" ||
               spec.boardMode === "opponent_any" || spec.boardMode === "opponent_facedown" ||
               spec.boardMode === "opponent_covered") &&
         (spec.boardMode === "opponent_covered" ? !isTopCard : isTopCard);
@@ -1267,6 +1272,7 @@ export class GameScene extends Phaser.Scene {
 
     switch (spec.boardMode) {
       case "any_card":           return isTopCard;
+      case "any_other":          return isTopCard && c.instanceId !== effect.sourceInstanceId;
       case "any_facedown":       return c.face === CardFace.FaceDown && isTopCard;
       case "any_uncovered":      return isTopCard;
       case "opponent_any":       return isOpp && isTopCard;
@@ -1287,6 +1293,7 @@ export class GameScene extends Phaser.Scene {
   private getBoardPickHint(boardMode: string): string {
     switch (boardMode) {
       case "any_card":            return "Click any card on the board \u2193";
+      case "any_other":           return "Click any other card on the board \u2193";
       case "any_facedown":        return "Click a face-down card on the board \u2193";
       case "any_uncovered":       return "Click any uncovered (top) card on the board \u2193";
       case "opponent_any":        return "Click any of your opponent\u2019s cards \u2193";

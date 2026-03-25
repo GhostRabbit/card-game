@@ -456,6 +456,37 @@ describe("executeEffect — return (wtr_3 / wtr_4)", () => {
     expect(state.players[0].hand).toHaveLength(0);
     expect(state.pendingLogs.some((l) => l.includes("must be uncovered"))).toBe(true);
   });
+
+  it("line_value_2 returns all value-2 cards from the selected line", () => {
+    const state = makeState();
+    // line 1 (both sides): value-2 cards include face-down cards and explicit value-2 defs.
+    state.players[0].lines[1].cards.push(
+      { instanceId: "p0_fd", defId: "spd_5", face: CardFace.FaceDown }, // value 2 when face-down
+      { instanceId: "p0_v2", defId: "wtr_2", face: CardFace.FaceUp },
+      { instanceId: "p0_v3", defId: "wtr_3", face: CardFace.FaceUp },
+    );
+    state.players[1].lines[1].cards.push(
+      { instanceId: "p1_v2", defId: "dth_2", face: CardFace.FaceUp },
+      { instanceId: "p1_v5", defId: "dth_5", face: CardFace.FaceUp },
+    );
+
+    executeEffect(state, effect("return", 0, { targets: "line_value_2", targetLineIndex: 1 }));
+
+    expect(state.players[0].lines[1].cards.map((c) => c.instanceId)).toEqual(["p0_v3"]);
+    expect(state.players[1].lines[1].cards.map((c) => c.instanceId)).toEqual(["p1_v5"]);
+    expect(state.players[0].hand.map((c) => c.instanceId).sort()).toEqual(["p0_fd", "p0_v2", "p1_v2"].sort());
+  });
+
+  it("line_value_2 logs and skips when targetLineIndex is missing", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards.push({ instanceId: "v2", defId: "wtr_2", face: CardFace.FaceUp });
+
+    executeEffect(state, effect("return", 0, { targets: "line_value_2" }));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(1);
+    expect(state.players[0].hand).toHaveLength(0);
+    expect(state.pendingLogs.some((l) => l.includes("line_value_2: no valid targetLineIndex"))).toBe(true);
+  });
 });
 
 // ─── executeEffect: conditional_draw ─────────────────────────────────────────

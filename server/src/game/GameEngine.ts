@@ -6,6 +6,15 @@ import { enqueueEffectsFromCard, executeEffect, enqueueEffectsOnCover } from "./
 
 // ─── Internal full GameState (server-side, no masking) ───────────────────────
 
+export type EffectResolutionContext = "immediate" | "cache" | "start" | "end";
+
+export interface ResolutionFrame {
+  context: EffectResolutionContext;
+  ownerIndex: 0 | 1;
+  turnNumber: number;
+  source: string;
+}
+
 export interface ServerGameState extends GameState {
   /** Full deck arrays for each player (not exposed to clients) */
   decks: [CardInstance[], CardInstance[]];
@@ -17,8 +26,8 @@ export interface ServerGameState extends GameState {
   pendingLogs: string[];
   /** Effects waiting for player confirmation before they execute */
   effectQueue: PendingEffect[];
-  /** Tracks which turn-flow stage we paused at so we can resume correctly */
-  effectQueueContext: "immediate" | "cache" | "start" | "end" | null;
+  /** Explicit effect-resolution call stack for deterministic resume order */
+  resolutionStack: ResolutionFrame[];
   /** When true the clear-cache discard at end of turn is skipped once */
   skipCheckCache: boolean;
   /** When true the active player cannot compile this turn (consumed once) */
@@ -55,7 +64,7 @@ export function createServerGameState(
     compilableLines: [],
     pendingLogs: [],
     effectQueue: [],
-    effectQueueContext: null,
+    resolutionStack: [],
     skipCheckCache: false,
     denyCompile: false,
       compileDeniedThisTurn: false,
@@ -71,6 +80,24 @@ export function createServerGameState(
     compiledLineThisTurn: null,
     winner: null,
   };
+}
+
+export function pushResolutionFrame(
+  state: ServerGameState,
+  context: EffectResolutionContext,
+  ownerIndex: 0 | 1,
+  source: string,
+): void {
+  state.resolutionStack.push({
+    context,
+    ownerIndex,
+    turnNumber: state.turnNumber,
+    source,
+  });
+}
+
+export function popResolutionFrame(state: ServerGameState): ResolutionFrame | null {
+  return state.resolutionStack.pop() ?? null;
 }
 
 // ─── Value helpers ────────────────────────────────────────────────────────────
@@ -362,7 +389,7 @@ export function endTurn(state: ServerGameState): void {
           payload: { reason: "cache" },
         });
       }
-      state.effectQueueContext = "cache";
+      pushResolutionFrame(state, "cache", pi, "endTurn.cache");
       state.turnPhase = TurnPhase.EffectResolution;
       return;
     }
@@ -394,7 +421,7 @@ export function endTurn(state: ServerGameState): void {
   }
 
   if (state.effectQueue.length > 0) {
-    state.effectQueueContext = "end";
+    pushResolutionFrame(state, "end", pi, "endTurn.endEffects");
     state.turnPhase = TurnPhase.EffectResolution;
     return;
   }
@@ -426,7 +453,7 @@ export function finishTurn(state: ServerGameState): void {
   }
 
   if (state.effectQueue.length > 0) {
-    state.effectQueueContext = "start";
+    pushResolutionFrame(state, "start", pi, "finishTurn.startEffects");
     state.turnPhase = TurnPhase.EffectResolution;
     return;
   }
@@ -449,8 +476,8 @@ export function resolveNextEffect(state: ServerGameState, targetInstanceId?: str
 /** Called when the effect queue has just drained.
  *  Resumes the turn flow from wherever it was paused. */
 export function continueAfterEffects(state: ServerGameState): void {
-  const ctx = state.effectQueueContext;
-  state.effectQueueContext = null;
+  const ctx = popResolutionFrame(state)?.context;
+  if (!ctx) return;
   if (ctx === "immediate") {
     if (state.pendingBonusPlay) {
       // A bonus play was granted — stay in Action phase so the player can play one more card
@@ -499,7 +526,7 @@ export function chooseCompile(
     return { success: true };
   }
 
-  endTurn(state);
+  // Room.ts drives the animated CACHE → END → START sequence.
   return { success: true };
 }
 
@@ -568,12 +595,12 @@ export function playCard(
   }
 
   if (state.effectQueue.length > 0) {
-    state.effectQueueContext = "immediate";
+    pushResolutionFrame(state, "immediate", playerIndex, "playCard.immediate");
     state.turnPhase = TurnPhase.EffectResolution;
     return { success: true };
   }
 
-  endTurn(state);
+  // Room.ts drives the animated CACHE → END → START sequence.
   return { success: true };
 }
 
@@ -601,7 +628,7 @@ export function refresh(state: ServerGameState, playerIndex: 0 | 1): PlayCardRes
     return { success: true };
   }
 
-  endTurn(state);
+  // Room.ts drives the animated CACHE → END → START sequence.
   return { success: true };
 }
 
@@ -641,6 +668,6 @@ export function resolveControlReorder(
   }
 
   state.pendingControlReorder = null;
-  endTurn(state);
+  // Room.ts drives the animated CACHE → END → START sequence.
   return { success: true };
 }

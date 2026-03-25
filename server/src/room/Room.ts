@@ -28,6 +28,8 @@ import {
   finishTurn,
   drawCards,
   discardFromHand,
+  pushResolutionFrame,
+  popResolutionFrame,
   ServerGameState,
 } from "../game/GameEngine";
 import { buildPlayerView } from "../game/StateView";
@@ -216,14 +218,11 @@ export class Room {
     const cardLabel = playedCard ? playedCard.defId : instanceId;
     this.logger?.log("PLAY_CARD", `P${slot.index} (${slot.username}) played ${cardLabel} face=${face} line=${lineIndex} | turn=${this.gameState.turnNumber}`);
     this.flushEffectLogs();
-    if (this.gameState.turnPhase !== TurnPhase.EffectResolution) {
-      this.checkWin();
-      if (this.gameState) {
-        const next = this.gameState.activePlayerIndex;
-        this.logger?.log("TURN", `Turn ${this.gameState.turnNumber} — active: P${next} (${this.players[next]?.username})`);
-      }
+    if (this.gameState.turnPhase === TurnPhase.EffectResolution) {
+      this.broadcastState();
+      return;
     }
-    this.broadcastState();
+    this.broadcastEndTurnPhases(this.gameState);
   }
 
   handleCompileLine(socket: AppSocket, lineIndex: number): void {
@@ -241,16 +240,13 @@ export class Room {
       socket.emit("action_rejected", { reason: result.reason ?? "Action rejected." });
       return;
     }
-    this.logger?.log("COMPILE", `P${slot.index} (${slot.username}) compiled line=${lineIndex} | turn=${this.gameState.turnNumber - 1}`);
+    this.logger?.log("COMPILE", `P${slot.index} (${slot.username}) compiled line=${lineIndex} | turn=${this.gameState.turnNumber}`);
     this.flushEffectLogs();
-    if (this.gameState.turnPhase !== TurnPhase.EffectResolution) {
-      this.checkWin();
-      if (this.gameState) {
-        const next = this.gameState.activePlayerIndex;
-        this.logger?.log("TURN", `Turn ${this.gameState.turnNumber} — active: P${next} (${this.players[next]?.username})`);
-      }
+    if (this.gameState.turnPhase === TurnPhase.EffectResolution) {
+      this.broadcastState();
+      return;
     }
-    this.broadcastState();
+    this.broadcastEndTurnPhases(this.gameState);
   }
 
   handleRefresh(socket: AppSocket): void {
@@ -270,16 +266,13 @@ export class Room {
       return;
     }
     const handAfter = this.gameState.players[slot.index].hand.length;
-    this.logger?.log("RESET", `P${slot.index} (${slot.username}) reset: hand ${handBefore}→${handAfter} | turn=${this.gameState.turnNumber - 1}`);
+    this.logger?.log("RESET", `P${slot.index} (${slot.username}) reset: hand ${handBefore}→${handAfter} | turn=${this.gameState.turnNumber}`);
     this.flushEffectLogs();
-    if (this.gameState.turnPhase !== TurnPhase.EffectResolution) {
-      this.checkWin();
-      if (this.gameState) {
-        const next = this.gameState.activePlayerIndex;
-        this.logger?.log("TURN", `Turn ${this.gameState.turnNumber} — active: P${next} (${this.players[next]?.username})`);
-      }
+    if (this.gameState.turnPhase === TurnPhase.EffectResolution) {
+      this.broadcastState();
+      return;
     }
-    this.broadcastState();
+    this.broadcastEndTurnPhases(this.gameState);
   }
 
   handleControlReorder(socket: AppSocket, whose?: "self" | "opponent", newProtocolOrder?: string[]): void {
@@ -295,12 +288,7 @@ export class Room {
     }
     this.logger?.log("CTRL", `P${slot.index} (${slot.username}) control reorder${whose ? `: ${whose} [${newProtocolOrder?.join(",")}]` : ": skipped"}`);
     this.flushEffectLogs();
-    this.checkWin();
-    if (this.gameState) {
-      const next = this.gameState.activePlayerIndex;
-      this.logger?.log("TURN", `Turn ${this.gameState.turnNumber} — active: P${next} (${this.players[next]?.username})`);
-    }
-    this.broadcastState();
+    this.broadcastEndTurnPhases(this.gameState);
   }
 
   handleResolveEffect(socket: AppSocket, effectId: string, targetInstanceId?: string, newProtocolOrder?: string[], swapProtocolIds?: string[], targetLineIndex?: number, discardInstanceId?: string): void {
@@ -345,8 +333,7 @@ export class Room {
     }
 
     // Queue drained — resume the turn flow
-    const ctx = state.effectQueueContext;
-    state.effectQueueContext = null;
+    const ctx = popResolutionFrame(state)?.context;
     
     if (ctx === "immediate") {
       if (state.pendingBonusPlay) {
@@ -381,6 +368,8 @@ export class Room {
         return;
       }
       this.broadcastState();
+    } else {
+      this.broadcastState();
     }
   }
 
@@ -390,6 +379,8 @@ export class Room {
     // Step 1: Show CACHE phase
     state.turnPhase = TurnPhase.ClearCache;
     const pi = state.activePlayerIndex;
+    this.flushEffectLogs();
+    this.broadcastState();
     
     // Execute cache logic
     if (state.skipCheckCache) {
@@ -398,21 +389,24 @@ export class Room {
     } else {
       const over5 = state.players[pi].hand.length - 5;
       if (over5 > 0) {
-        for (let i = 0; i < over5; i++) {
-          state.effectQueue.push({
-            id: `${Date.now()}-cache-${i}`,
-            cardDefId: "cache_discard",
-            cardName: "Cache",
-            type: "discard",
-            description: "Choose a card to discard for Cache.",
-            ownerIndex: pi,
-            trigger: "immediate",
-            payload: { reason: "cache" },
-          });
-        }
-        state.effectQueueContext = "cache";
-        state.turnPhase = TurnPhase.EffectResolution;
-        this.broadcastState();
+        const cacheTimer = setTimeout(() => {
+          for (let i = 0; i < over5; i++) {
+            state.effectQueue.push({
+              id: `${Date.now()}-cache-${i}`,
+              cardDefId: "cache_discard",
+              cardName: "Cache",
+              type: "discard",
+              description: "Choose a card to discard for Cache.",
+              ownerIndex: pi,
+              trigger: "immediate",
+              payload: { reason: "cache" },
+            });
+          }
+          pushResolutionFrame(state, "cache", pi, "room.broadcastEndTurnPhases.cache");
+          state.turnPhase = TurnPhase.EffectResolution;
+          this.broadcastState();
+        }, PHASE_HIGHLIGHT_MS);
+        this.phaseSequenceTimers.push(cacheTimer);
         return;
       }
     }
@@ -433,9 +427,6 @@ export class Room {
       }
     }
     
-    this.flushEffectLogs();
-    this.broadcastState();
-    
     // Step 2: After 500ms, show END phase
     const endTimer = setTimeout(() => {
       state.turnPhase = TurnPhase.End;
@@ -453,7 +444,7 @@ export class Room {
       
       if (state.effectQueue.length > 0) {
         // End effects need resolution
-        state.effectQueueContext = "end";
+        pushResolutionFrame(state, "end", pi, "room.broadcastEndTurnPhases.end");
         state.turnPhase = TurnPhase.EffectResolution;
         this.broadcastState();
         return;
