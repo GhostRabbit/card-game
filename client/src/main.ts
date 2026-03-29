@@ -4,6 +4,7 @@ import { DraftScene } from "./scenes/DraftScene";
 import { GameScene } from "./scenes/GameScene";
 import { GameOverScene } from "./scenes/GameOverScene";
 import { MockGameScene } from "./scenes/MockGameScene";
+import { CardPreviewScene } from "./scenes/CardPreviewScene";
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -17,7 +18,7 @@ const config: Phaser.Types.Core.GameConfig = {
     width: 1600,
     height: 720,
   },
-  scene: [MenuScene, DraftScene, GameScene, MockGameScene, GameOverScene],
+  scene: [MenuScene, DraftScene, GameScene, MockGameScene, CardPreviewScene, GameOverScene],
 };
 
 const game = new Phaser.Game(config);
@@ -28,9 +29,17 @@ const game = new Phaser.Game(config);
 // Check for test mode query parameter
 const urlParams = new URLSearchParams(window.location.search);
 const isTestMode = urlParams.has('test') && urlParams.get('test') === '1';
+const isPreviewMode = urlParams.has('preview') && urlParams.get('preview') === '1';
 
 // Override the scene startup based on test mode
-if (isTestMode) {
+if (isPreviewMode) {
+  game.events.once('ready', () => {
+    if (game.scene.isActive('MenuScene')) {
+      game.scene.stop('MenuScene');
+    }
+    game.scene.start('CardPreviewScene');
+  });
+} else if (isTestMode) {
   // In test mode, stop the auto-started MenuScene and start MockGameScene instead
   game.events.once('ready', () => {
     if (game.scene.isActive('MenuScene')) {

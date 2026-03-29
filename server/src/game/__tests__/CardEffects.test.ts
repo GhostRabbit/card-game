@@ -262,6 +262,15 @@ describe("enqueueEffectsFromCard", () => {
     expect(state.effectQueue[0].trigger).toBe("start");
   });
 
+  it("psy_3 queues only opponent_discard (no extra shift effect)", () => {
+    const state = makeState();
+
+    enqueueEffectsFromCard(state, 0, "psy_3", "immediate");
+
+    expect(state.effectQueue).toHaveLength(1);
+    expect(state.effectQueue[0].type).toBe("opponent_discard");
+  });
+
   it("is a no-op for an unknown card defId", () => {
     const state = makeState();
 
@@ -277,6 +286,19 @@ describe("enqueueEffectsFromCard", () => {
 
     const ids = state.effectQueue.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("plg_4 queues two separate end effects (opponent delete, then optional self flip)", () => {
+    const state = makeState();
+
+    enqueueEffectsFromCard(state, 0, "plg_4", "end", "src");
+
+    expect(state.effectQueue).toHaveLength(2);
+    expect(state.effectQueue[0].type).toBe("delete");
+    expect(state.effectQueue[0].payload.targets).toBe("opponent_facedown");
+    expect(state.effectQueue[1].type).toBe("flip");
+    expect(state.effectQueue[1].payload.targets).toBe("self");
+    expect(state.effectQueue[1].payload.optional).toBe(true);
   });
 });
 
@@ -406,14 +428,27 @@ describe("executeEffect — return (wtr_3 / wtr_4)", () => {
     expect(state.players[0].hand[0].face).toBe(CardFace.FaceUp);
   });
 
-  it("can return a card from the opponent's line to the owner's hand", () => {
+  it("can return a card from the opponent's line to that card owner's hand", () => {
     const state = makeState();
     state.players[1].lines[2].cards.push(card("c1"));
 
     executeEffect(state, effect("return", 0, { targetInstanceId: "c1" }));
 
     expect(state.players[1].lines[2].cards).toHaveLength(0);
-    expect(state.players[0].hand[0].instanceId).toBe("c1");
+    expect(state.players[1].hand[0].instanceId).toBe("c1");
+    expect(state.players[0].hand).toHaveLength(0);
+  });
+
+  it("opponent_any returns the card to its actual owner's hand", () => {
+    const state = makeState();
+    state.players[1].lines[1].cards.push({ instanceId: "opp1", defId: "spd_3", face: CardFace.FaceDown });
+
+    executeEffect(state, effect("return", 0, { targets: "opponent_any", targetInstanceId: "opp1" }));
+
+    expect(state.players[1].lines[1].cards).toHaveLength(0);
+    expect(state.players[1].hand.map((c) => c.instanceId)).toEqual(["opp1"]);
+    expect(state.players[0].hand).toHaveLength(0);
+    expect(state.players[1].hand[0].face).toBe(CardFace.FaceUp);
   });
 
   it("logs and skips when no targetInstanceId is provided", () => {
@@ -1305,62 +1340,52 @@ describe("executeEffect — return_opp_flip_self (psy_4)", () => {
   });
 });
 
-// ─── executeEffect: opp_delete_facedown_flip_self ────────────────────────────
+// ─── executeEffect: delete (opponent_facedown target) ───────────────────────
 
-describe("executeEffect — opp_delete_facedown_flip_self (plg_4)", () => {
-  function oppDeleteFlipEffect(targetInstanceId?: string, flipSelf = false, sourceInstanceId?: string): PendingEffect {
-    return {
-      ...effect("opp_delete_facedown_flip_self", 0, targetInstanceId ? { targetInstanceId, flipSelf } : {}),
-      sourceInstanceId,
-    };
-  }
-
-  it("deletes opponent face-down card and flips source when flipSelf=true", () => {
+describe("executeEffect — delete (targets=opponent_facedown, plg_4)", () => {
+  it("deletes an uncovered opponent face-down card", () => {
     const state = makeState();
-    const oppCard: CardInstance = { instanceId: "opp1", defId: "dummy", face: CardFace.FaceDown };
-    const src: CardInstance = { instanceId: "src", defId: "plg_4", face: CardFace.FaceUp };
-    state.players[1].lines[0].cards.push(oppCard);
-    state.players[0].lines[0].cards.push(src);
+    state.players[1].lines[0].cards.push({ instanceId: "opp1", defId: "dummy", face: CardFace.FaceDown });
 
-    executeEffect(state, oppDeleteFlipEffect("opp1", true, "src"));
+    executeEffect(state, effect("delete", 0, { targets: "opponent_facedown", targetInstanceId: "opp1" }));
 
     expect(state.players[1].lines[0].cards).toHaveLength(0);
     expect(state.trashes[1]).toHaveLength(1);
-    expect(src.face).toBe(CardFace.FaceDown); // flipped
   });
 
-  it("deletes opponent card but does NOT flip source when flipSelf=false", () => {
+  it("rejects deleting an own face-down card", () => {
     const state = makeState();
-    const oppCard: CardInstance = { instanceId: "opp1", defId: "dummy", face: CardFace.FaceDown };
+    state.players[0].lines[0].cards.push({ instanceId: "own1", defId: "dummy", face: CardFace.FaceDown });
+
+    executeEffect(state, effect("delete", 0, { targets: "opponent_facedown", targetInstanceId: "own1" }));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(1);
+    expect(state.pendingLogs.some((l) => l.includes("must target opponent"))).toBe(true);
+  });
+});
+
+// ─── executeEffect: flip (targets=self, optional=true) ──────────────────────
+
+describe("executeEffect — flip (targets=self, optional=true, plg_4)", () => {
+  it("skips when optional self flip has no target selected", () => {
+    const state = makeState();
     const src: CardInstance = { instanceId: "src", defId: "plg_4", face: CardFace.FaceUp };
-    state.players[1].lines[0].cards.push(oppCard);
     state.players[0].lines[0].cards.push(src);
 
-    executeEffect(state, oppDeleteFlipEffect("opp1", false, "src"));
+    executeEffect(state, { ...effect("flip", 0, { targets: "self", optional: true }), sourceInstanceId: "src" });
 
-    expect(state.trashes[1]).toHaveLength(1);
-    expect(src.face).toBe(CardFace.FaceUp); // not flipped
+    expect(src.face).toBe(CardFace.FaceUp);
+    expect(state.pendingLogs.some((l) => l.includes("optional, skipped"))).toBe(true);
   });
 
-  it("does not delete face-up opponent card (only face-down eligible)", () => {
+  it("flips the source card when selected", () => {
     const state = makeState();
-    const oppCard: CardInstance = { instanceId: "opp1", defId: "dummy", face: CardFace.FaceUp };
     const src: CardInstance = { instanceId: "src", defId: "plg_4", face: CardFace.FaceUp };
-    state.players[1].lines[0].cards.push(oppCard);
     state.players[0].lines[0].cards.push(src);
 
-    executeEffect(state, oppDeleteFlipEffect("opp1", true, "src"));
+    executeEffect(state, { ...effect("flip", 0, { targets: "self", optional: true, targetInstanceId: "src" }), sourceInstanceId: "src" });
 
-    expect(state.players[1].lines[0].cards).toHaveLength(1); // not deleted
-    expect(state.pendingLogs.some((l) => l.includes("not found"))).toBe(true);
-  });
-
-  it("logs and skips when no targetInstanceId provided", () => {
-    const state = makeState();
-
-    executeEffect(state, oppDeleteFlipEffect());
-
-    expect(state.pendingLogs.some((l) => l.includes("no target"))).toBe(true);
+    expect(src.face).toBe(CardFace.FaceDown);
   });
 });
 
@@ -1436,35 +1461,43 @@ describe("executeEffect — draw_from_opponent_deck (lov_1)", () => {
 // ─── executeEffect: exchange_hand ────────────────────────────────────────────
 
 describe("executeEffect — exchange_hand (lov_3)", () => {
-  it("swaps a chosen card from own hand with a random opponent card", () => {
+  it("first takes a random opponent card and queues a follow-up give choice", () => {
     const state = makeState();
-    const myCard: CardInstance = { instanceId: "mine", defId: "dummy", face: CardFace.FaceUp };
     const oppCard: CardInstance = { instanceId: "theirs", defId: "dummy2", face: CardFace.FaceUp };
-    state.players[0].hand.push(myCard);
     state.players[1].hand.push(oppCard);
 
-    executeEffect(state, effect("exchange_hand", 0, { targetInstanceId: "mine" }));
+    executeEffect(state, effect("exchange_hand", 0, {}));
 
-    // owner should now hold the opponent's card
     expect(state.players[0].hand.some((c) => c.instanceId === "theirs")).toBe(true);
-    expect(state.players[0].hand.some((c) => c.instanceId === "mine")).toBe(false);
-    // opponent should now hold owner's card
-    expect(state.players[1].hand.some((c) => c.instanceId === "mine")).toBe(true);
     expect(state.players[1].hand.some((c) => c.instanceId === "theirs")).toBe(false);
+    expect(state.effectQueue[0]?.type).toBe("exchange_hand");
+    expect(state.effectQueue[0]?.payload.awaitGive).toBe(true);
   });
 
-  it("logs and skips when no targetInstanceId is provided", () => {
+  it("second step gives the chosen card to the opponent", () => {
     const state = makeState();
-    state.players[1].hand.push(card("opp1"));
-    executeEffect(state, effect("exchange_hand", 0, {}));
-    expect(state.pendingLogs.some((l) => l.includes("no card chosen"))).toBe(true);
+    const myCard: CardInstance = { instanceId: "mine", defId: "dummy", face: CardFace.FaceUp };
+    state.players[0].hand.push(myCard);
+
+    executeEffect(state, effect("exchange_hand", 0, { awaitGive: true, targetInstanceId: "mine" }));
+
+    expect(state.players[0].hand.some((c) => c.instanceId === "mine")).toBe(false);
+    expect(state.players[1].hand.some((c) => c.instanceId === "mine")).toBe(true);
   });
 
   it("logs and skips when opponent hand is empty", () => {
     const state = makeState();
-    state.players[0].hand.push(card("mine"));
-    executeEffect(state, effect("exchange_hand", 0, { targetInstanceId: "mine" }));
+    executeEffect(state, effect("exchange_hand", 0, {}));
     expect(state.pendingLogs.some((l) => l.includes("no cards to take"))).toBe(true);
+  });
+
+  it("logs and skips on the give step when no card is chosen", () => {
+    const state = makeState();
+    state.players[0].hand.push(card("mine"));
+
+    executeEffect(state, effect("exchange_hand", 0, { awaitGive: true }));
+
+    expect(state.pendingLogs.some((l) => l.includes("no card chosen"))).toBe(true);
   });
 });
 
@@ -1523,6 +1556,50 @@ describe("executeEffect — discard_or_flip_self (spr_1 start)", () => {
     executeEffect(state, { ...effect("discard_or_flip_self", 0, {}), sourceInstanceId: "src" });
 
     expect(src.face).toBe(CardFace.FaceDown); // flipped
+  });
+});
+
+// ─── executeEffect: new conditional helpers ──────────────────────────────────
+
+describe("executeEffect — Main Unit 2 helper effects", () => {
+  it("draw_if_hand_empty draws only when the owner's hand is empty", () => {
+    const state = makeState();
+    state.decks[0].push(card("d1"), card("d2"));
+    state.players[0].deckSize = 2;
+
+    executeEffect(state, effect("draw_if_hand_empty", 0, { amount: 1 }));
+    expect(state.players[0].hand).toHaveLength(1);
+
+    executeEffect(state, effect("draw_if_hand_empty", 0, { amount: 1 }));
+    expect(state.players[0].hand).toHaveLength(1);
+  });
+
+  it("draw_if_opponent_higher_in_line draws when the opponent is winning the source line", () => {
+    const state = makeState();
+    const source: CardInstance = { instanceId: "src", defId: "dummy", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards.push(source);
+    state.players[1].lines[0].cards.push({ instanceId: "opp", defId: "spd_3", face: CardFace.FaceUp });
+    state.decks[0].push(card("d1"));
+    state.players[0].deckSize = 1;
+
+    executeEffect(state, effect("draw_if_opponent_higher_in_line", 0, { amount: 1 }, "src"));
+
+    expect(state.players[0].hand).toHaveLength(1);
+  });
+
+  it("flip_self_if_hand_gt flips the source card only when the threshold is exceeded", () => {
+    const state = makeState();
+    const source: CardInstance = { instanceId: "src", defId: "pea_6", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards.push(source);
+    state.players[0].hand.push(card("h1"), card("h2"));
+
+    executeEffect(state, effect("flip_self_if_hand_gt", 0, { threshold: 1 }, "src"));
+    expect(source.face).toBe(CardFace.FaceDown);
+
+    source.face = CardFace.FaceUp;
+    state.players[0].hand.splice(1, 1);
+    executeEffect(state, effect("flip_self_if_hand_gt", 0, { threshold: 1 }, "src"));
+    expect(source.face).toBe(CardFace.FaceUp);
   });
 });
 
@@ -1610,6 +1687,17 @@ describe("executeEffect — flip", () => {
     executeEffect(state, flipEffect("any_card", { targetInstanceId: "t1" }));
 
     expect(target.face).toBe(CardFace.FaceUp);
+  });
+
+  it("any_card: does not flip cards with cannot_be_flipped", () => {
+    const state = makeState();
+    const target: CardInstance = { instanceId: "ice", defId: "ice_4", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards.push(target);
+
+    executeEffect(state, flipEffect("any_card", { targetInstanceId: "ice" }));
+
+    expect(target.face).toBe(CardFace.FaceUp);
+    expect(state.pendingLogs.some((l) => l.includes("cannot be flipped"))).toBe(true);
   });
 
   // ─── any_other ─────────────────────────────────────────────────────────────
@@ -2816,6 +2904,19 @@ describe("executeEffect — shift (own_facedown_in_line)", () => {
 
     expect(state.pendingLogs.some((l) => l.includes("no valid targetLineIndex"))).toBe(true);
   });
+
+  it("moves an opponent uncovered face-down card in the same line", () => {
+    const state = makeState();
+    const src = card("lgt3", CardFace.FaceUp);
+    const oppFdTop = card("oppfdtop", CardFace.FaceDown);
+    state.players[0].lines[1].cards.push(src);
+    state.players[1].lines[1].cards.push(oppFdTop);
+
+    executeEffect(state, effect("shift", 0, { targets: "own_facedown_in_line", targetLineIndex: 0 }, "lgt3"));
+
+    expect(state.players[1].lines[1].cards.map((c) => c.instanceId)).not.toContain("oppfdtop");
+    expect(state.players[1].lines[0].cards.map((c) => c.instanceId)).toContain("oppfdtop");
+  });
 });
 
 describe("executeEffect — shift (no targets / grv_1 style)", () => {
@@ -3051,6 +3152,43 @@ describe("lineValue — passive modifiers", () => {
     ];
     expect(lineValue(state, 0, 0)).toBe(3); // no reduction
   });
+
+  it("value_bonus_per_hand_card adds 1 per card in hand", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards = [
+      { instanceId: "clr", defId: "clr_0", face: CardFace.FaceUp },
+      { instanceId: "base", defId: "spd_3", face: CardFace.FaceUp },
+    ];
+    state.players[0].hand = [card("h1"), card("h2"), card("h3")];
+
+    expect(lineValue(state, 0, 0)).toBe(6);
+  });
+
+  it("value_bonus_per_opponent_card_in_line adds per opposing card in that line", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards = [
+      { instanceId: "mir", defId: "mir_0", face: CardFace.FaceUp },
+      { instanceId: "base", defId: "spd_3", face: CardFace.FaceUp },
+    ];
+    state.players[1].lines[0].cards = [
+      { instanceId: "opp1", defId: "spd_1", face: CardFace.FaceUp },
+      { instanceId: "opp2", defId: "spd_5", face: CardFace.FaceDown },
+    ];
+
+    expect(lineValue(state, 0, 0)).toBe(5);
+  });
+
+  it("value_bonus_if_other_faceup_not_protocol_in_stack only applies with another face-up protocol", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards = [
+      { instanceId: "div", defId: "div_2", face: CardFace.FaceUp },
+      { instanceId: "same-proto", defId: "div_4", face: CardFace.FaceUp },
+    ];
+    expect(lineValue(state, 0, 0)).toBe(6);
+
+    state.players[0].lines[0].cards.push({ instanceId: "other-proto", defId: "spd_1", face: CardFace.FaceUp });
+    expect(lineValue(state, 0, 0)).toBe(9);
+  });
 });
 
 // ─── playCard — deny passive mechanics ───────────────────────────────────────
@@ -3281,22 +3419,42 @@ describe("enqueueEffectsOnCover — on_covered_flip_self (apy_2)", () => {
   });
 });
 
-describe("executeEffect — on_covered_delete_self (lif_0)", () => {
-  it("removes lif_0 from its line and adds to trash", () => {
+describe("enqueueEffectsOnCover — on_covered_draw (clr_1)", () => {
+  it("enqueues a draw effect with the configured amount", () => {
+    const state = makeState();
+    const clr1: CardInstance = { instanceId: "clr1", defId: "clr_1", face: CardFace.FaceUp };
+
+    enqueueEffectsOnCover(state, clr1, 0);
+
+    const drawEffects = state.effectQueue.filter((e) => e.sourceInstanceId === "clr1");
+    expect(drawEffects).toHaveLength(1);
+    expect(drawEffects[0].type).toBe("draw");
+    expect(drawEffects[0].payload.amount).toBe(3);
+  });
+});
+
+describe("executeEffect — delete_self_if_covered (lif_0)", () => {
+  it("removes lif_0 from its line and adds to trash when covered", () => {
     const state = makeState();
     const lif0: CardInstance = { instanceId: "lif0", defId: "lif_0", face: CardFace.FaceUp };
-    state.players[0].lines[0].cards = [lif0];
-    executeEffect(state, effect("on_covered_delete_self", 0, {}, "lif0"));
-    expect(state.players[0].lines[0].cards).toHaveLength(0);
+    const cover: CardInstance = { instanceId: "cover", defId: "spd_1", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards = [lif0, cover];
+    executeEffect(state, effect("delete_self_if_covered", 0, {}, "lif0"));
+    expect(state.players[0].lines[0].cards.map((c) => c.instanceId)).not.toContain("lif0");
     expect(state.trashes[0]).toHaveLength(1);
     expect(state.trashes[0][0].instanceId).toBe("lif0");
   });
 
-  it("handles missing source gracefully", () => {
+  it("skips when lif_0 is not covered", () => {
     const state = makeState();
-    expect(() =>
-      executeEffect(state, effect("on_covered_delete_self", 0, {}))
-    ).not.toThrow();
+    const lif0: CardInstance = { instanceId: "lif0", defId: "lif_0", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards = [lif0];
+
+    executeEffect(state, effect("delete_self_if_covered", 0, {}, "lif0"));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(1);
+    expect(state.players[0].lines[0].cards[0].instanceId).toBe("lif0");
+    expect(state.trashes[0]).toHaveLength(0);
   });
 });
 
@@ -3373,11 +3531,11 @@ describe("executeEffect — on_covered_deck_to_other_line (lif_3)", () => {
 });
 
 describe("playCard — on-cover hooks fire when a card is covered", () => {
-  it("enqueues on_covered effects when playCard covers lif_0", () => {
+  it("enqueues on_covered effects when playCard covers mtl_6", () => {
     const state = makeDenyState();
-    // Place lif_0 face-up in player 0's line 0
-    const lif0: CardInstance = { instanceId: "lif0", defId: "lif_0", face: CardFace.FaceUp };
-    state.players[0].lines[0].cards = [lif0];
+    // Place mtl_6 face-up in player 0's line 0
+    const mtl6: CardInstance = { instanceId: "mtl6", defId: "mtl_6", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards = [mtl6];
     // Play a face-down card on top
     playCard(state, 0, "hand0", CardFace.FaceDown, 0);
     // on_covered_delete_self should be in the queue
@@ -3439,12 +3597,12 @@ describe("executeEffect — after_draw_shift_self (spr_3)", () => {
   it("enqueues cover effects on the previous top card of the destination line", () => {
     const state = makeState();
     const spr3: CardInstance = { instanceId: "spr3", defId: "spr_3", face: CardFace.FaceUp };
-    // Place a lif_0 (on_covered_delete_self) face-up in line 1 as existing top
-    const lif0: CardInstance = { instanceId: "bot", defId: "lif_0", face: CardFace.FaceUp };
+    // Place an mtl_6 (on_covered_delete_self) face-up in line 1 as existing top
+    const mtl6: CardInstance = { instanceId: "bot", defId: "mtl_6", face: CardFace.FaceUp };
     state.players[0].lines[0].cards = [spr3];
-    state.players[0].lines[1].cards = [lif0];
+    state.players[0].lines[1].cards = [mtl6];
     executeEffect(state, effect("after_draw_shift_self", 0, { targetLineIndex: 1 }, "spr3"));
-    // spr3 is now on top of line 1, covering lif0 → on_covered_delete_self queued
+    // spr3 is now on top of line 1, covering mtl6 → on_covered_delete_self queued
     expect(state.effectQueue.some((e) => e.type === "on_covered_delete_self")).toBe(true);
   });
 
@@ -3522,9 +3680,9 @@ describe("executeEffect — on_compile_delete_shift_self (spd_2)", () => {
   it("enqueues cover effects on the previous top card when placed in occupied line", () => {
     const state = makeState();
     const spd2: CardInstance = { instanceId: "spd2", defId: "spd_2", face: CardFace.FaceUp };
-    const lif0: CardInstance = { instanceId: "bot", defId: "lif_0", face: CardFace.FaceUp };
+    const mtl6: CardInstance = { instanceId: "bot", defId: "mtl_6", face: CardFace.FaceUp };
     state.compileSavedCards = [{ card: spd2, ownerIndex: 0 }];
-    state.players[0].lines[0].cards = [lif0];
+    state.players[0].lines[0].cards = [mtl6];
     executeEffect(
       state,
       effect("on_compile_delete_shift_self", 0, { savedInstanceId: "spd2", targetLineIndex: 0 })
@@ -3779,5 +3937,605 @@ describe("control reorder — triggered by compile/refresh with control", () => 
     expect(state.pendingControlReorder).toBeNull();
     // Protocols unchanged (invalid order was silently skipped)
     expect(state.players[0].protocols.find(p => p.protocolId === "proto_a")!.lineIndex).toBe(0);
+  });
+});
+
+// ─── delete_self_if_field_protocols_below ────────────────────────────────────
+
+describe("executeEffect — delete_self_if_field_protocols_below (div_5)", () => {
+  it("deletes source when distinct protocols in field are below threshold", () => {
+    const state = makeState();
+    const src: CardInstance = { instanceId: "div5", defId: "div_5", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards = [src];
+    // only 2 distinct protocols in field: div + spd
+    state.players[1].lines[0].cards = [{ instanceId: "spd", defId: "spd_3", face: CardFace.FaceDown }];
+
+    executeEffect(state, effect("delete_self_if_field_protocols_below", 0, { minDistinct: 4 }, "div5"));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(0);
+    expect(state.trashes[0].some((c) => c.instanceId === "div5")).toBe(true);
+  });
+
+  it("does not delete source when threshold is met", () => {
+    const state = makeState();
+    const src: CardInstance = { instanceId: "div5", defId: "div_5", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards = [src];
+    // 4 distinct protocols in field: div, spd, drk, lif
+    state.players[0].lines[1].cards = [{ instanceId: "a", defId: "spd_1", face: CardFace.FaceUp }];
+    state.players[1].lines[0].cards = [{ instanceId: "b", defId: "drk_1", face: CardFace.FaceUp }];
+    state.players[1].lines[1].cards = [{ instanceId: "c", defId: "lif_1", face: CardFace.FaceDown }];
+
+    executeEffect(state, effect("delete_self_if_field_protocols_below", 0, { minDistinct: 4 }, "div5"));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(1);
+    expect(state.trashes[0].some((c) => c.instanceId === "div5")).toBe(false);
+  });
+});
+
+describe("executeEffect — draw_per_protocol_cards_in_field (uni_2)", () => {
+  it("draws one card per matching protocol card in the field", () => {
+    const state = makeState();
+    state.decks[0] = [
+      { instanceId: "d1", defId: "spd_1", face: CardFace.FaceDown },
+      { instanceId: "d2", defId: "spd_3", face: CardFace.FaceDown },
+      { instanceId: "d3", defId: "spd_5", face: CardFace.FaceDown },
+    ];
+    state.players[0].deckSize = 3;
+    state.players[0].lines[0].cards = [{ instanceId: "u1", defId: "uni_2", face: CardFace.FaceUp }];
+    state.players[1].lines[1].cards = [{ instanceId: "u2", defId: "uni_3", face: CardFace.FaceDown }];
+
+    executeEffect(state, effect("draw_per_protocol_cards_in_field", 0, { protocolId: "proto_uni" }));
+
+    expect(state.players[0].hand).toHaveLength(2);
+    expect(state.players[0].deckSize).toBe(1);
+  });
+
+  it("does nothing when there are no matching protocol cards", () => {
+    const state = makeState();
+    state.decks[0] = [{ instanceId: "d1", defId: "spd_1", face: CardFace.FaceDown }];
+    state.players[0].deckSize = 1;
+
+    executeEffect(state, effect("draw_per_protocol_cards_in_field", 0, { protocolId: "proto_uni" }));
+
+    expect(state.players[0].hand).toHaveLength(0);
+    expect(state.players[0].deckSize).toBe(1);
+  });
+});
+
+describe("executeEffect — draw_per_distinct_protocols_in_source_line (div_1)", () => {
+  it("draws one card per distinct protocol across both sides of the source line", () => {
+    const state = makeState();
+    state.decks[0] = [
+      { instanceId: "d1", defId: "spd_1", face: CardFace.FaceDown },
+      { instanceId: "d2", defId: "spd_3", face: CardFace.FaceDown },
+      { instanceId: "d3", defId: "spd_5", face: CardFace.FaceDown },
+    ];
+    state.players[0].deckSize = 3;
+    state.players[0].lines[0].cards = [
+      { instanceId: "div1", defId: "div_1", face: CardFace.FaceUp },
+      { instanceId: "spd", defId: "spd_2", face: CardFace.FaceUp },
+    ];
+    state.players[1].lines[0].cards = [
+      { instanceId: "drk", defId: "drk_1", face: CardFace.FaceUp },
+    ];
+
+    executeEffect(state, effect("draw_per_distinct_protocols_in_source_line", 0, {}, "div1"));
+
+    expect(state.players[0].hand).toHaveLength(3);
+    expect(state.players[0].deckSize).toBe(0);
+  });
+});
+
+describe("executeEffect — draw_all_protocol_from_deck_if_hand_empty (uni_4)", () => {
+  it("draws all matching protocol cards from deck when hand is empty and shuffles the rest", () => {
+    const state = makeState();
+    state.decks[0] = [
+      { instanceId: "u1", defId: "uni_1", face: CardFace.FaceDown },
+      { instanceId: "s1", defId: "spd_1", face: CardFace.FaceDown },
+      { instanceId: "u5", defId: "uni_5", face: CardFace.FaceDown },
+    ];
+    state.players[0].deckSize = 3;
+
+    executeEffect(state, effect("draw_all_protocol_from_deck_if_hand_empty", 0, { protocolId: "proto_uni" }));
+
+    expect(state.players[0].hand.map((c) => c.defId).sort()).toEqual(["uni_1", "uni_5"]);
+    expect(state.players[0].hand.every((c) => c.face === CardFace.FaceUp)).toBe(true);
+    expect(state.decks[0]).toHaveLength(1);
+    expect(state.decks[0][0].defId).toBe("spd_1");
+    expect(state.players[0].deckSize).toBe(1);
+  });
+
+  it("skips when hand is not empty", () => {
+    const state = makeState();
+    state.players[0].hand.push({ instanceId: "h1", defId: "spd_1", face: CardFace.FaceUp });
+    state.decks[0] = [{ instanceId: "u1", defId: "uni_1", face: CardFace.FaceDown }];
+    state.players[0].deckSize = 1;
+
+    executeEffect(state, effect("draw_all_protocol_from_deck_if_hand_empty", 0, { protocolId: "proto_uni" }));
+
+    expect(state.players[0].hand).toHaveLength(1);
+    expect(state.decks[0]).toHaveLength(1);
+  });
+});
+
+describe("executeEffect — draw_value_from_deck_then_shuffle (clr_3)", () => {
+  it("draws one matching value card from deck and shuffles the rest", () => {
+    const state = makeState();
+    state.decks[0] = [
+      { instanceId: "a", defId: "spd_1", face: CardFace.FaceDown },
+      { instanceId: "b", defId: "spd_5", face: CardFace.FaceDown },
+      { instanceId: "c", defId: "drk_2", face: CardFace.FaceDown },
+    ];
+    state.players[0].deckSize = 3;
+
+    executeEffect(state, effect("draw_value_from_deck_then_shuffle", 0, { value: 5 }));
+
+    expect(state.players[0].hand).toHaveLength(1);
+    expect(state.players[0].hand[0].defId).toBe("spd_5");
+    expect(state.players[0].hand[0].face).toBe(CardFace.FaceUp);
+    expect(state.decks[0]).toHaveLength(2);
+    expect(state.players[0].deckSize).toBe(2);
+  });
+
+  it("just shuffles when no matching value exists", () => {
+    const state = makeState();
+    state.decks[0] = [
+      { instanceId: "a", defId: "spd_1", face: CardFace.FaceDown },
+      { instanceId: "b", defId: "drk_2", face: CardFace.FaceDown },
+    ];
+    state.players[0].deckSize = 2;
+
+    executeEffect(state, effect("draw_value_from_deck_then_shuffle", 0, { value: 5 }));
+
+    expect(state.players[0].hand).toHaveLength(0);
+    expect(state.decks[0]).toHaveLength(2);
+    expect(state.pendingLogs.some((l) => l.includes("no value-5 card found"))).toBe(true);
+  });
+});
+
+describe("executeEffect — flip (div_3 field-distinct threshold)", () => {
+  it("flips an uncovered card whose value is below the distinct protocol count", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards = [
+      { instanceId: "src", defId: "div_3", face: CardFace.FaceUp },
+      { instanceId: "own2", defId: "spd_2", face: CardFace.FaceUp },
+    ];
+    state.players[1].lines[0].cards = [
+      { instanceId: "opp3", defId: "drk_3", face: CardFace.FaceUp },
+    ];
+
+    executeEffect(state, effect("flip", 0, { targets: "any_uncovered", maxValueSource: "distinct_protocols_in_field", valueComparison: "lt", targetInstanceId: "own2" }, "src"));
+
+    expect(state.players[0].lines[0].cards[1].face).toBe(CardFace.FaceDown);
+  });
+
+  it("skips when the chosen card value is not below the distinct protocol count", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards = [
+      { instanceId: "src", defId: "div_3", face: CardFace.FaceUp },
+      { instanceId: "own5", defId: "spd_5", face: CardFace.FaceUp },
+    ];
+    state.players[1].lines[0].cards = [
+      { instanceId: "opp3", defId: "drk_3", face: CardFace.FaceUp },
+    ];
+
+    executeEffect(state, effect("flip", 0, { targets: "any_uncovered", maxValueSource: "distinct_protocols_in_field", valueComparison: "lt", targetInstanceId: "own5" }, "src"));
+
+    expect(state.players[0].lines[0].cards[1].face).toBe(CardFace.FaceUp);
+  });
+});
+
+describe("executeEffect — flip (uni_3 conditional face-up flip)", () => {
+  it("flips a face-up uncovered target when another Unity card is in the field", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards = [
+      { instanceId: "src", defId: "uni_3", face: CardFace.FaceUp },
+    ];
+    state.players[1].lines[1].cards = [
+      { instanceId: "otherUnity", defId: "uni_2", face: CardFace.FaceDown },
+    ];
+    state.players[1].lines[0].cards = [
+      { instanceId: "target", defId: "spd_1", face: CardFace.FaceUp },
+    ];
+
+    executeEffect(state, effect("flip", 0, { targets: "any_faceup_uncovered", optional: true, protocolId: "proto_uni", minCountInField: 2, targetInstanceId: "target" }, "src"));
+
+    expect(state.players[1].lines[0].cards[0].face).toBe(CardFace.FaceDown);
+  });
+
+  it("skips when there is no other Unity card in the field", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards = [
+      { instanceId: "src", defId: "uni_3", face: CardFace.FaceUp },
+    ];
+    state.players[1].lines[0].cards = [
+      { instanceId: "target", defId: "spd_1", face: CardFace.FaceUp },
+    ];
+
+    executeEffect(state, effect("flip", 0, { targets: "any_faceup_uncovered", optional: true, protocolId: "proto_uni", minCountInField: 2, targetInstanceId: "target" }, "src"));
+
+    expect(state.players[1].lines[0].cards[0].face).toBe(CardFace.FaceUp);
+    expect(state.pendingLogs.some((l) => l.includes("fewer than 2"))).toBe(true);
+  });
+});
+
+describe("executeEffect — flip (mir_3 follow-up same-line target)", () => {
+  it("flips an opponent uncovered card in the same line as the last targeted own card", () => {
+    const state = makeState();
+    state.players[0].lines[1].cards = [
+      { instanceId: "own", defId: "mir_3", face: CardFace.FaceDown },
+    ];
+    state.players[1].lines[1].cards = [
+      { instanceId: "opp", defId: "spd_1", face: CardFace.FaceUp },
+    ];
+    state.lastTargetedInstanceId = "own";
+
+    executeEffect(state, effect("flip", 0, { targets: "opponent_in_last_target_line", targetInstanceId: "opp" }));
+
+    expect(state.players[1].lines[1].cards[0].face).toBe(CardFace.FaceDown);
+  });
+
+  it("skips when the opponent target is not in the same line as the last targeted own card", () => {
+    const state = makeState();
+    state.players[0].lines[1].cards = [
+      { instanceId: "own", defId: "mir_3", face: CardFace.FaceDown },
+    ];
+    state.players[1].lines[0].cards = [
+      { instanceId: "opp", defId: "spd_1", face: CardFace.FaceUp },
+    ];
+    state.lastTargetedInstanceId = "own";
+
+    executeEffect(state, effect("flip", 0, { targets: "opponent_in_last_target_line", targetInstanceId: "opp" }));
+
+    expect(state.players[1].lines[0].cards[0].face).toBe(CardFace.FaceUp);
+    expect(state.pendingLogs.some((l) => l.includes("same line as the last targeted"))).toBe(true);
+  });
+});
+
+describe("executeEffect — shift (targets=any_uncovered)", () => {
+  it("shifts an uncovered card from either side to the chosen line", () => {
+    const state = makeState();
+    state.players[1].lines[0].cards = [
+      { instanceId: "opp1", defId: "spd_1", face: CardFace.FaceUp },
+    ];
+
+    executeEffect(state, effect("shift", 0, { targets: "any_uncovered", targetInstanceId: "opp1", targetLineIndex: 2 }));
+
+    expect(state.players[1].lines[0].cards).toHaveLength(0);
+    expect(state.players[1].lines[2].cards[0].instanceId).toBe("opp1");
+  });
+});
+
+// ─── reshuffle_trash ──────────────────────────────────────────────────────────
+
+describe("executeEffect — reshuffle_trash (clr_4)", () => {
+  it("moves all owner trash cards back into the deck face-down", () => {
+    const state = makeState();
+    state.trashes[0] = [
+      { instanceId: "t1", defId: "spd_1", face: CardFace.FaceUp },
+      { instanceId: "t2", defId: "spd_5", face: CardFace.FaceUp },
+    ];
+    state.players[0].trashSize = 2;
+    executeEffect(state, effect("reshuffle_trash", 0, {}));
+    expect(state.trashes[0]).toHaveLength(0);
+    expect(state.players[0].trashSize).toBe(0);
+    expect(state.decks[0]).toHaveLength(2);
+    expect(state.players[0].deckSize).toBe(2);
+    expect(state.decks[0].every((c) => c.face === CardFace.FaceDown)).toBe(true);
+  });
+
+  it("no-op when trash is already empty", () => {
+    const state = makeState();
+    state.trashes[0] = [];
+    const deckBefore = state.decks[0].length;
+    executeEffect(state, effect("reshuffle_trash", 0, {}));
+    expect(state.decks[0]).toHaveLength(deckBefore);
+    expect(state.pendingLogs.some((l) => l.includes("trash is already empty"))).toBe(true);
+  });
+});
+
+// ─── swap_top_deck_draws ──────────────────────────────────────────────────────
+
+describe("executeEffect — swap_top_deck_draws (cha_0 / asm_4)", () => {
+  it("each player draws the top card of the other's deck face-up", () => {
+    const state = makeState();
+    state.decks[0] = [{ instanceId: "d0", defId: "spd_1", face: CardFace.FaceDown }];
+    state.decks[1] = [{ instanceId: "d1", defId: "spd_5", face: CardFace.FaceDown }];
+    state.players[0].deckSize = 1;
+    state.players[1].deckSize = 1;
+
+    executeEffect(state, effect("swap_top_deck_draws", 0, {}));
+
+    // Owner (p0) should have drawn from opponent's (p1's) deck
+    expect(state.players[0].hand.some((c) => c.instanceId === "d1")).toBe(true);
+    expect(state.players[0].hand[0].face).toBe(CardFace.FaceUp);
+    // Opponent (p1) should have drawn from owner's (p0's) deck
+    expect(state.players[1].hand.some((c) => c.instanceId === "d0")).toBe(true);
+    expect(state.players[1].hand[0].face).toBe(CardFace.FaceUp);
+    expect(state.decks[0]).toHaveLength(0);
+    expect(state.decks[1]).toHaveLength(0);
+  });
+
+  it("works when only one player has a deck card", () => {
+    const state = makeState();
+    state.decks[0] = [];
+    state.decks[1] = [{ instanceId: "d1", defId: "spd_3", face: CardFace.FaceDown }];
+    state.players[0].deckSize = 0;
+    state.players[1].deckSize = 1;
+
+    executeEffect(state, effect("swap_top_deck_draws", 0, {}));
+
+    expect(state.players[0].hand.some((c) => c.instanceId === "d1")).toBe(true);
+    expect(state.players[1].hand).toHaveLength(0);
+  });
+});
+
+// ─── flip_covered_in_each_line ────────────────────────────────────────────────
+
+describe("executeEffect — flip_covered_in_each_line (cha_0 immediate)", () => {
+  it("flips the deepest covered card in each line for both players", () => {
+    const state = makeState();
+    const bot = { instanceId: "bot", defId: "spd_1", face: CardFace.FaceDown as CardFace };
+    const mid = { instanceId: "mid", defId: "spd_3", face: CardFace.FaceUp  as CardFace };
+    const top = { instanceId: "top", defId: "spd_5", face: CardFace.FaceUp  as CardFace };
+    state.players[0].lines[0].cards = [bot, mid, top];
+
+    executeEffect(state, effect("flip_covered_in_each_line", 0, {}));
+
+    // bot (deepest covered, index 0) should be flipped to FaceUp
+    expect(state.players[0].lines[0].cards[0].face).toBe(CardFace.FaceUp);
+  });
+
+  it("skips lines with fewer than 2 cards (no covered cards)", () => {
+    const state = makeState();
+    const solo = { instanceId: "solo", defId: "spd_3", face: CardFace.FaceUp as CardFace };
+    state.players[0].lines[0].cards = [solo];
+
+    executeEffect(state, effect("flip_covered_in_each_line", 0, {}));
+
+    expect(state.players[0].lines[0].cards[0].face).toBe(CardFace.FaceUp);
+  });
+});
+
+// ─── flip_self_if_opponent_higher_in_line ─────────────────────────────────────
+
+describe("executeEffect — flip_self_if_opponent_higher_in_line (crg_6)", () => {
+  it("flips source card when opponent has higher line value", () => {
+    const state = makeState();
+    const src = { instanceId: "src", defId: "spd_1", face: CardFace.FaceUp as CardFace };
+    state.players[0].lines[0].cards = [src];
+    // Opponent has value 3 in line 0 vs owner value 1
+    state.players[1].lines[0].cards = [{ instanceId: "opp", defId: "spd_3", face: CardFace.FaceUp as CardFace }];
+
+    executeEffect(state, effect("flip_self_if_opponent_higher_in_line", 0, {}, "src"));
+
+    expect(src.face).toBe(CardFace.FaceDown);
+  });
+
+  it("does not flip when owner has equal or higher line value", () => {
+    const state = makeState();
+    const src = { instanceId: "src", defId: "spd_5", face: CardFace.FaceUp as CardFace };
+    state.players[0].lines[0].cards = [src];
+    state.players[1].lines[0].cards = [{ instanceId: "opp", defId: "spd_3", face: CardFace.FaceUp as CardFace }];
+
+    executeEffect(state, effect("flip_self_if_opponent_higher_in_line", 0, {}, "src"));
+
+    expect(src.face).toBe(CardFace.FaceUp);
+  });
+});
+
+// ─── discard_or_delete_self ───────────────────────────────────────────────────
+
+describe("executeEffect — discard_or_delete_self (cor_6)", () => {
+  it("discards the chosen hand card when a targetInstanceId is provided", () => {
+    const state = makeState();
+    state.players[0].hand = [{ instanceId: "h1", defId: "spd_3", face: CardFace.FaceUp }];
+    const src = { instanceId: "src", defId: "spd_1", face: CardFace.FaceUp as CardFace };
+    state.players[0].lines[0].cards = [src];
+
+    executeEffect(state, effect("discard_or_delete_self", 0, { targetInstanceId: "h1" }, "src"));
+
+    expect(state.players[0].hand).toHaveLength(0);
+    expect(state.trashes[0].some((c) => c.instanceId === "h1")).toBe(true);
+    // Source card stays in line
+    expect(state.players[0].lines[0].cards).toHaveLength(1);
+  });
+
+  it("deletes the source card when no targetInstanceId is provided", () => {
+    const state = makeState();
+    state.players[0].hand = [];
+    const src = { instanceId: "src", defId: "spd_1", face: CardFace.FaceUp as CardFace };
+    state.players[0].lines[0].cards = [src];
+
+    executeEffect(state, effect("discard_or_delete_self", 0, {}, "src"));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(0);
+    expect(state.trashes[0].some((c) => c.instanceId === "src")).toBe(true);
+  });
+});
+
+// ─── take_opponent_facedown_to_hand ──────────────────────────────────────────
+
+describe("executeEffect — take_opponent_facedown_to_hand (asm_0)", () => {
+  it("moves a face-down opponent card to owner's hand", () => {
+    const state = makeState();
+    const tgt = { instanceId: "ofd1", defId: "spd_3", face: CardFace.FaceDown as CardFace };
+    state.players[1].lines[0].cards = [tgt];
+
+    executeEffect(state, effect("take_opponent_facedown_to_hand", 0, { targetInstanceId: "ofd1" }));
+
+    expect(state.players[1].lines[0].cards).toHaveLength(0);
+    expect(state.players[0].hand.some((c) => c.instanceId === "ofd1")).toBe(true);
+    expect(state.players[0].hand[0].face).toBe(CardFace.FaceUp);
+  });
+
+  it("rejects a face-up opponent card", () => {
+    const state = makeState();
+    const tgt = { instanceId: "ofu1", defId: "spd_3", face: CardFace.FaceUp as CardFace };
+    state.players[1].lines[0].cards = [tgt];
+
+    executeEffect(state, effect("take_opponent_facedown_to_hand", 0, { targetInstanceId: "ofu1" }));
+
+    expect(state.players[1].lines[0].cards).toHaveLength(1);
+    expect(state.players[0].hand).toHaveLength(0);
+  });
+
+  it("moves even a covered face-down opponent card", () => {
+    const state = makeState();
+    const covered = { instanceId: "cov1", defId: "spd_1", face: CardFace.FaceDown as CardFace };
+    const top     = { instanceId: "top1", defId: "spd_5", face: CardFace.FaceUp  as CardFace };
+    state.players[1].lines[0].cards = [covered, top];
+
+    executeEffect(state, effect("take_opponent_facedown_to_hand", 0, { targetInstanceId: "cov1" }));
+
+    expect(state.players[0].hand.some((c) => c.instanceId === "cov1")).toBe(true);
+    expect(state.players[1].lines[0].cards).toHaveLength(1);
+  });
+});
+
+// ─── delete_in_winning_line ───────────────────────────────────────────────────
+
+describe("executeEffect — delete_in_winning_line (crg_1)", () => {
+  it("deletes uncovered opponent card when opponent has higher line value", () => {
+    const state = makeState();
+    const tgt = { instanceId: "opp1", defId: "spd_3", face: CardFace.FaceUp as CardFace };
+    state.players[1].lines[0].cards = [tgt];
+    // Owner line 0 has value 1 < opponent value 3
+    state.players[0].lines[0].cards = [{ instanceId: "own1", defId: "spd_1", face: CardFace.FaceUp as CardFace }];
+
+    executeEffect(state, effect("delete_in_winning_line", 0, { targetInstanceId: "opp1" }));
+
+    expect(state.players[1].lines[0].cards).toHaveLength(0);
+    expect(state.trashes[1].some((c) => c.instanceId === "opp1")).toBe(true);
+  });
+
+  it("rejects deletion when opponent does NOT have higher line value", () => {
+    const state = makeState();
+    const tgt = { instanceId: "opp1", defId: "spd_1", face: CardFace.FaceUp as CardFace };
+    state.players[1].lines[0].cards = [tgt];
+    state.players[0].lines[0].cards = [{ instanceId: "own1", defId: "spd_3", face: CardFace.FaceUp as CardFace }];
+
+    executeEffect(state, effect("delete_in_winning_line", 0, { targetInstanceId: "opp1" }));
+
+    expect(state.players[1].lines[0].cards).toHaveLength(1);
+  });
+
+  it("rejects covered opponent cards", () => {
+    const state = makeState();
+    const covered = { instanceId: "cov1", defId: "spd_3", face: CardFace.FaceUp as CardFace };
+    const top     = { instanceId: "top1", defId: "spd_5", face: CardFace.FaceUp as CardFace };
+    state.players[1].lines[0].cards = [covered, top];
+    state.players[0].lines[0].cards = [];
+
+    executeEffect(state, effect("delete_in_winning_line", 0, { targetInstanceId: "cov1" }));
+
+    expect(state.players[1].lines[0].cards).toHaveLength(2);
+  });
+});
+
+// ─── shift_self_to_best_opponent_line ────────────────────────────────────────
+
+describe("executeEffect — shift_self_to_best_opponent_line (crg_3)", () => {
+  it("moves source card to the line where opponent has highest value", () => {
+    const state = makeState();
+    const src = { instanceId: "src", defId: "spd_1", face: CardFace.FaceUp as CardFace };
+    state.players[0].lines[0].cards = [src];
+    // Line 2 has highest opponent value (5)
+    state.players[1].lines[0].cards = [{ instanceId: "o0", defId: "spd_1", face: CardFace.FaceUp as CardFace }];
+    state.players[1].lines[1].cards = [{ instanceId: "o1", defId: "spd_3", face: CardFace.FaceUp as CardFace }];
+    state.players[1].lines[2].cards = [{ instanceId: "o2", defId: "spd_5", face: CardFace.FaceUp as CardFace }];
+
+    executeEffect(state, effect("shift_self_to_best_opponent_line", 0, {}, "src"));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(0);
+    expect(state.players[0].lines[2].cards.some((c) => c.instanceId === "src")).toBe(true);
+  });
+
+  it("stays put when already in best opponent line", () => {
+    const state = makeState();
+    const src = { instanceId: "src", defId: "spd_1", face: CardFace.FaceUp as CardFace };
+    state.players[0].lines[0].cards = [src];
+    state.players[1].lines[0].cards = [{ instanceId: "o0", defId: "spd_5", face: CardFace.FaceUp as CardFace }];
+
+    executeEffect(state, effect("shift_self_to_best_opponent_line", 0, {}, "src"));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(1);
+    expect(state.pendingLogs.some((l) => l.includes("already in best line"))).toBe(true);
+  });
+});
+
+// ─── discard_then_opponent_discard ────────────────────────────────────────────
+
+describe("executeEffect — discard_then_opponent_discard (crg_0 end)", () => {
+  it("discards chosen card and queues opponent discard", () => {
+    const state = makeState();
+    state.players[0].hand = [{ instanceId: "h1", defId: "spd_3", face: CardFace.FaceUp }];
+
+    executeEffect(state, effect("discard_then_opponent_discard", 0, { targetInstanceId: "h1" }));
+
+    expect(state.players[0].hand).toHaveLength(0);
+    expect(state.trashes[0].some((c) => c.instanceId === "h1")).toBe(true);
+    // Opponent discard queued
+    const queued = state.effectQueue.find((e) => e.type === "discard" && e.ownerIndex === 1);
+    expect(queued).toBeDefined();
+  });
+
+  it("skips entirely when no card is chosen (optional)", () => {
+    const state = makeState();
+    state.players[0].hand = [{ instanceId: "h1", defId: "spd_3", face: CardFace.FaceUp }];
+
+    executeEffect(state, effect("discard_then_opponent_discard", 0, {}));
+
+    expect(state.players[0].hand).toHaveLength(1);
+    expect(state.effectQueue).toHaveLength(0);
+    expect(state.pendingLogs.some((l) => l.includes("skipped"))).toBe(true);
+  });
+});
+
+// ─── shift — own_covered target mode ─────────────────────────────────────────
+
+describe("executeEffect — shift (own_covered)", () => {
+  it("moves own covered card to another own line", () => {
+    const state = makeState();
+    const covered = card("cov1", CardFace.FaceDown);
+    const top     = card("top1", CardFace.FaceUp);
+    state.players[0].lines[0].cards = [covered, top];
+
+    executeEffect(state, effect("shift", 0, { targets: "own_covered", targetInstanceId: "cov1", targetLineIndex: 2 }));
+
+    expect(state.players[0].lines[0].cards.map((c) => c.instanceId)).not.toContain("cov1");
+    expect(state.players[0].lines[2].cards.some((c) => c.instanceId === "cov1")).toBe(true);
+  });
+
+  it("rejects a top (uncovered) own card", () => {
+    const state = makeState();
+    const top = card("top1", CardFace.FaceUp);
+    state.players[0].lines[0].cards = [top];
+
+    executeEffect(state, effect("shift", 0, { targets: "own_covered", targetInstanceId: "top1", targetLineIndex: 2 }));
+
+    expect(state.players[0].lines[0].cards).toHaveLength(1);
+    expect(state.players[0].lines[2].cards).toHaveLength(0);
+  });
+});
+
+// ─── shift — opponent_in_source_line target mode ──────────────────────────────
+
+describe("executeEffect — shift (opponent_in_source_line)", () => {
+  it("moves opponent's uncovered card from the same line as source to another opponent line", () => {
+    const state = makeState();
+    const src  = card("src1", CardFace.FaceUp);
+    const oppCard = card("opp1", CardFace.FaceUp);
+    state.players[0].lines[1].cards = [src];
+    state.players[1].lines[1].cards = [oppCard];
+
+    executeEffect(state, effect(
+      "shift", 0,
+      { targets: "opponent_in_source_line", targetInstanceId: "opp1", targetLineIndex: 0 },
+      "src1"
+    ));
+
+    expect(state.players[1].lines[1].cards).toHaveLength(0);
+    expect(state.players[1].lines[0].cards.some((c) => c.instanceId === "opp1")).toBe(true);
   });
 });

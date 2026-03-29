@@ -54,7 +54,7 @@ Passive effects are **not** tracked per-card here — they require a separate ev
 
 | Card | Value | Active effects | Status |
 |---|---|---|---|
-| dth_0 | 0 | `delete` each other line | ✅ |
+| dth_0 | 0 | `delete` any card | ✅ |
 | dth_1 | 1 | `draw_then_delete_self` (start) | ✅ |
 | dth_2 | 2 | `delete` line values 1–2 | ✅ |
 | dth_3 | 3 | `delete` any face-down | ✅ |
@@ -156,7 +156,7 @@ Passive effects are **not** tracked per-card here — they require a separate ev
 | psy_0 | 0 | `draw` 2 + `opponent_discard_reveal` 2 | ✅ |
 | psy_1 | 1 | `flip_self` (start) | � flip_self ✅ / passive 🔵 |
 | psy_2 | 2 | `opponent_discard` 2 + `rearrange_protocols` opp | ✅ |
-| psy_3 | 3 | `opponent_discard` 1 + `shift` opp any | 🔶 discard ✅ / shift 🔲 |
+| psy_3 | 3 | `opponent_discard` 1 | ✅ |
 | psy_4 | 4 | `return_opp_flip_self` (end) | ✅ |
 | psy_5 | 5 | `discard` 1 | ✅ |
 

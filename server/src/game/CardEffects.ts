@@ -1,12 +1,13 @@
 import { CardFace, CardInstance, PendingEffect } from "@compile/shared";
 import { v4 as uuidv4 } from "uuid";
 import { CARD_MAP } from "../data/cards";
-import { ServerGameState, drawCards, discardFromHand, FACE_DOWN_VALUE } from "./GameEngine";
+import { ServerGameState, drawCards, discardFromHand, FACE_DOWN_VALUE, lineValue } from "./GameEngine";
 import { shuffle } from "./DraftEngine";
 
 // ─── Whitelist of stub effect types that are known but not yet implemented ────
 
 const KNOWN_STUB_TYPES = new Set<string>([
+  "ocr_unimplemented",
 ]);
 
 /**
@@ -183,6 +184,16 @@ export function enqueueEffectsOnCover(
         });
         break;
       }
+      case "on_covered_draw": {
+        state.effectQueue.push({
+          id: uuidv4(), cardDefId: coveredCard.defId, cardName: def.name,
+          type: "draw", description: effect.description,
+          ownerIndex, trigger: "immediate",
+          payload: { amount: (effect.payload?.amount as number) ?? 1 },
+          sourceInstanceId: coveredCard.instanceId,
+        });
+        break;
+      }
       case "on_covered_or_flip_delete_self": {
         // mtl_6: covered → delete self (reuse on_covered_delete_self handler)
         state.effectQueue.push({
@@ -318,6 +329,67 @@ function isSourceCardActive(state: ServerGameState, instanceId: string): boolean
     }
   }
   return false;
+}
+
+function countDistinctProtocolsInField(state: ServerGameState): number {
+  const protocolIds = new Set<string>();
+  for (const player of state.players) {
+    for (const line of player.lines) {
+      for (const card of line.cards) {
+        const def = CARD_MAP.get(card.defId);
+        if (def?.protocolId) protocolIds.add(def.protocolId);
+      }
+    }
+  }
+  return protocolIds.size;
+}
+
+function countCardsInFieldByProtocol(state: ServerGameState, protocolId: string): number {
+  let count = 0;
+  for (const player of state.players) {
+    for (const line of player.lines) {
+      for (const card of line.cards) {
+        const def = CARD_MAP.get(card.defId);
+        if (def?.protocolId === protocolId) count++;
+      }
+    }
+  }
+  return count;
+}
+
+function findSourceLineIndex(
+  state: ServerGameState,
+  ownerIndex: 0 | 1,
+  sourceInstanceId: string | undefined,
+): number {
+  if (!sourceInstanceId) return -1;
+  for (let li = 0; li < 3; li++) {
+    if (state.players[ownerIndex].lines[li].cards.some((c) => c.instanceId === sourceInstanceId)) {
+      return li;
+    }
+  }
+  return -1;
+}
+
+function countDistinctProtocolsInLine(state: ServerGameState, lineIndex: number): number {
+  if (lineIndex < 0 || lineIndex > 2) return 0;
+  const protocolIds = new Set<string>();
+  for (const player of state.players) {
+    for (const card of player.lines[lineIndex].cards) {
+      const def = CARD_MAP.get(card.defId);
+      if (def?.protocolId) protocolIds.add(def.protocolId);
+    }
+  }
+  return protocolIds.size;
+}
+
+function getEffectiveCardValue(card: CardInstance): number {
+  if (card.face === CardFace.FaceDown) return FACE_DOWN_VALUE;
+  return CARD_MAP.get(card.defId)?.value ?? 0;
+}
+
+function getCardDefinitionValue(card: CardInstance): number {
+  return CARD_MAP.get(card.defId)?.value ?? 0;
 }
 
 /**
@@ -468,6 +540,7 @@ export function executeEffect(
       // (targetLineIndex) that is different from the source card's line.
       const targetCardId = payload.targetInstanceId as string | undefined;
       const targetLineIndex = payload.targetLineIndex as number | undefined;
+      const requiresFaceDownInLine = payload.requiresFaceDownInLine === true;
 
       if (targetCardId === undefined || targetLineIndex === undefined) {
         log("play_facedown: no target card or line provided");
@@ -476,6 +549,15 @@ export function executeEffect(
       if (targetLineIndex < 0 || targetLineIndex > 2) {
         log(`play_facedown: invalid line index ${targetLineIndex}`);
         break;
+      }
+      if (requiresFaceDownInLine) {
+        const ownLine = state.players[ownerIndex].lines[targetLineIndex];
+        const oppLine = state.players[oi].lines[targetLineIndex];
+        const hasFaceDown = ownLine.cards.some((card) => card.face === CardFace.FaceDown) || oppLine.cards.some((card) => card.face === CardFace.FaceDown);
+        if (!hasFaceDown) {
+          log("play_facedown: target line must already contain a face-down card");
+          break;
+        }
       }
 
       // Validate the chosen line differs from the source card's line.
@@ -547,17 +629,25 @@ export function executeEffect(
         break;
       }
       let found = false;
-      outer: for (const player of state.players) {
-        for (const line of player.lines) {
+      outer: for (let pi = 0 as 0 | 1; pi <= 1; pi = (pi + 1) as 0 | 1) {
+        for (const line of state.players[pi].lines) {
           const idx = line.cards.findIndex((c) => c.instanceId === targetId);
           if (idx !== -1) {
             if (idx !== line.cards.length - 1) {
               log("return: target must be uncovered");
               break outer;
             }
+            if (targets === "own_any" && pi !== ownerIndex) {
+              log("return: target must be your own card");
+              break outer;
+            }
+            if (targets === "opponent_any" && pi === ownerIndex) {
+              log("return: target must be your opponent's card");
+              break outer;
+            }
             const [returned] = line.cards.splice(idx, 1);
             returned.face = CardFace.FaceUp;
-            state.players[ownerIndex].hand.push(returned);
+            state.players[pi].hand.push(returned);
             log(`return ${returned.defId} to hand`);
             found = true;
             break outer;
@@ -627,14 +717,37 @@ export function executeEffect(
     }
 
     case "exchange_hand": {
-      // Take 1 random card from opponent's hand; give 1 chosen card from own hand.
+      // Love 3 resolves in two steps: first take 1 random opponent hand card,
+      // then choose 1 card from your updated hand to give back.
+      const awaitGive = payload.awaitGive === true;
       const giveId = payload.targetInstanceId as string | undefined;
       const oppHand = state.players[oi].hand;
       const ownHand = state.players[ownerIndex].hand;
-      if (oppHand.length === 0) {
+      if (!awaitGive && oppHand.length === 0) {
         log("exchange_hand: opponent has no cards to take");
         break;
       }
+
+      if (!awaitGive) {
+        const takeIdx = Math.floor(Math.random() * oppHand.length);
+        const taken = oppHand.splice(takeIdx, 1)[0];
+        taken.face = CardFace.FaceUp;
+        ownHand.push(taken);
+        state.effectQueue.unshift({
+          id: uuidv4(),
+          cardDefId,
+          cardName: effect.cardName,
+          type: "exchange_hand",
+          description: "Give 1 card from your hand to your opponent.",
+          ownerIndex,
+          trigger,
+          payload: { awaitGive: true },
+          sourceInstanceId,
+        });
+        log(`exchange_hand: took ${taken.defId}; waiting for give choice`);
+        break;
+      }
+
       if (!giveId) {
         log("exchange_hand: no card chosen to give");
         break;
@@ -644,16 +757,11 @@ export function executeEffect(
         log(`exchange_hand: card ${giveId} not found in own hand`);
         break;
       }
-      // Take random card from opponent
-      const takeIdx = Math.floor(Math.random() * oppHand.length);
-      const taken = oppHand.splice(takeIdx, 1)[0];
-      taken.face = CardFace.FaceUp;
       // Give chosen card to opponent
       const [given] = ownHand.splice(giveIdx, 1);
       given.face = CardFace.FaceUp;
       oppHand.push(given);
-      ownHand.push(taken);
-      log(`exchange_hand: took ${taken.defId}, gave ${given.defId}`);
+      log(`exchange_hand: gave ${given.defId}`);
       break;
     }
 
@@ -719,6 +827,145 @@ export function executeEffect(
         drawCards(state, ownerIndex, needed);
       } else {
         log("refresh: hand already at 5 or more, nothing to draw");
+      }
+      break;
+    }
+
+    case "draw_if_hand_empty": {
+      const amount = (payload.amount as number) ?? 1;
+      if (state.players[ownerIndex].hand.length === 0) {
+        log(`draw_if_hand_empty: drawing ${amount}`);
+        drawCards(state, ownerIndex, amount);
+      } else {
+        log("draw_if_hand_empty: skipped (hand not empty)");
+      }
+      break;
+    }
+
+    case "draw_if_opponent_higher_in_line": {
+      const srcLine = findSourceLineIndex(state, ownerIndex, sourceInstanceId);
+      if (srcLine === -1) {
+        log("draw_if_opponent_higher_in_line: no sourceInstanceId");
+        break;
+      }
+      if (lineValue(state, oi, srcLine) > lineValue(state, ownerIndex, srcLine)) {
+        const amount = (payload.amount as number) ?? 1;
+        log(`draw_if_opponent_higher_in_line: drawing ${amount}`);
+        drawCards(state, ownerIndex, amount);
+      } else {
+        log("draw_if_opponent_higher_in_line: skipped (opponent not higher)");
+      }
+      break;
+    }
+
+    case "draw_per_distinct_protocols_in_source_line": {
+      const srcLine = findSourceLineIndex(state, ownerIndex, sourceInstanceId);
+      if (srcLine === -1) {
+        log("draw_per_distinct_protocols_in_source_line: source line not found");
+        break;
+      }
+      const amount = countDistinctProtocolsInLine(state, srcLine);
+      log(`draw_per_distinct_protocols_in_source_line: drawing ${amount}`);
+      drawCards(state, ownerIndex, amount);
+      break;
+    }
+
+    case "draw_value_from_deck_then_shuffle": {
+      const wantedValue = payload.value as number | undefined;
+      if (wantedValue === undefined) {
+        log("draw_value_from_deck_then_shuffle: missing value");
+        break;
+      }
+      const deck = state.decks[ownerIndex];
+      const matchIndex = deck.findIndex((card) => getCardDefinitionValue(card) === wantedValue);
+      if (matchIndex === -1) {
+        state.decks[ownerIndex] = shuffle(deck);
+        state.players[ownerIndex].deckSize = state.decks[ownerIndex].length;
+        log(`draw_value_from_deck_then_shuffle: no value-${wantedValue} card found; shuffled deck`);
+        break;
+      }
+      const [drawn] = deck.splice(matchIndex, 1);
+      drawn.face = CardFace.FaceUp;
+      state.players[ownerIndex].hand.push(drawn);
+      state.decks[ownerIndex] = shuffle(deck);
+      state.players[ownerIndex].deckSize = state.decks[ownerIndex].length;
+      log(`draw_value_from_deck_then_shuffle: drew ${drawn.defId} and shuffled deck`);
+      break;
+    }
+
+    case "trash_to_other_line_facedown": {
+      const targetLineIndex = payload.targetLineIndex as number | undefined;
+      if (targetLineIndex === undefined || targetLineIndex < 0 || targetLineIndex > 2) {
+        log("trash_to_other_line_facedown: no valid targetLineIndex provided");
+        break;
+      }
+
+      if (sourceInstanceId) {
+        const sourceLineIndex = state.players[ownerIndex].lines.findIndex((line) =>
+          line.cards.some((card) => card.instanceId === sourceInstanceId),
+        );
+        if (sourceLineIndex >= 0 && sourceLineIndex === targetLineIndex) {
+          log("trash_to_other_line_facedown: target line must be different from source line");
+          break;
+        }
+      }
+
+      const trash = state.trashes[ownerIndex];
+      if (trash.length === 0) {
+        log("trash_to_other_line_facedown: trash is empty");
+        break;
+      }
+
+      const [moved] = trash.splice(0, 1);
+      state.players[ownerIndex].trashSize = trash.length;
+      moved.face = CardFace.FaceDown;
+
+      const destLine = state.players[ownerIndex].lines[targetLineIndex];
+      const prevTop = destLine.cards.length > 0 ? destLine.cards[destLine.cards.length - 1] : null;
+      destLine.cards.push(moved);
+      if (prevTop) enqueueEffectsOnCover(state, prevTop, ownerIndex);
+
+      log(`trash_to_other_line_facedown: moved ${moved.defId} from trash to line ${targetLineIndex} face-down`);
+      break;
+    }
+
+    case "draw_all_protocol_from_deck_if_hand_empty": {
+      const protocolId = payload.protocolId as string | undefined;
+      if (!protocolId) {
+        log("draw_all_protocol_from_deck_if_hand_empty: missing protocolId");
+        break;
+      }
+      if (state.players[ownerIndex].hand.length > 0) {
+        log("draw_all_protocol_from_deck_if_hand_empty: skipped (hand not empty)");
+        break;
+      }
+      const deck = state.decks[ownerIndex];
+      const matching: CardInstance[] = [];
+      const remaining: CardInstance[] = [];
+      for (const card of deck) {
+        const def = CARD_MAP.get(card.defId);
+        if (def?.protocolId === protocolId) {
+          matching.push(card);
+        } else {
+          remaining.push(card);
+        }
+      }
+      state.decks[ownerIndex] = shuffle(remaining);
+      state.players[ownerIndex].deckSize = state.decks[ownerIndex].length;
+      for (const card of matching) {
+        card.face = CardFace.FaceUp;
+        state.players[ownerIndex].hand.push(card);
+      }
+      log(`draw_all_protocol_from_deck_if_hand_empty: drew ${matching.length} matching card(s) and shuffled deck`);
+      break;
+    }
+
+    case "flip_self_if_hand_gt": {
+      const threshold = (payload.threshold as number) ?? 0;
+      if (state.players[ownerIndex].hand.length > threshold) {
+        if (sourceInstanceId) flipSourceCard(state, sourceInstanceId, log);
+      } else {
+        log(`flip_self_if_hand_gt: skipped (hand size not greater than ${threshold})`);
       }
       break;
     }
@@ -931,6 +1178,16 @@ export function executeEffect(
             if (targets === "any_facedown" && (c.face !== CardFace.FaceDown || !isUncovered)) {
               log("delete any_facedown: target must be uncovered face-down");
               break outer;
+            }
+            if (targets === "opponent_facedown") {
+              if (pi === ownerIndex) {
+                log("delete opponent_facedown: must target opponent's card");
+                break outer;
+              }
+              if (c.face !== CardFace.FaceDown || !isUncovered) {
+                log("delete opponent_facedown: target must be uncovered face-down");
+                break outer;
+              }
             }
             if (targets === "value_0_or_1") {
               if (!isUncovered) {
@@ -1218,9 +1475,68 @@ export function executeEffect(
     }
 
     case "reveal_hand": {
-      // Opponent's full hand is revealed to the owner for this turn.
+      if (payload.awaitRead === true) {
+        // Player has confirmed they read the revealed hand — nothing more to do.
+        log("reveal_hand: read confirmed");
+        break;
+      }
+      // Step 1: reveal the hand and queue a mandatory read-confirm step.
       state.revealOpponentHandFor = ownerIndex;
       log(`reveal_hand: opponent hand revealed to player ${ownerIndex}`);
+      state.effectQueue.unshift({
+        id: uuidv4(),
+        cardDefId,
+        cardName: effect.cardName,
+        type: "reveal_hand",
+        description: "Review your opponent's revealed hand, then confirm.",
+        ownerIndex,
+        trigger,
+        payload: { awaitRead: true },
+      });
+      break;
+    }
+
+    case "reveal_top_deck": {
+      if (payload.awaitRead === true) {
+        // Step 2: player may optionally discard the revealed card.
+        const discardIt = !!payload.targetInstanceId;
+        const revealed = state.revealTopDeckFor;
+        if (discardIt && revealed?.playerIndex === ownerIndex) {
+          const deck = state.decks[ownerIndex];
+          const idx = deck.findIndex((c) => c.instanceId === revealed.card.instanceId);
+          if (idx !== -1) {
+            const [removed] = deck.splice(idx, 1);
+            state.trashes[ownerIndex].push(removed);
+            state.players[ownerIndex].deckSize = deck.length;
+            state.players[ownerIndex].trashSize = state.trashes[ownerIndex].length;
+            log(`reveal_top_deck: discarded ${removed.defId}`);
+          }
+        } else {
+          log("reveal_top_deck: kept top card");
+        }
+        state.revealTopDeckFor = null;
+        break;
+      }
+      // Step 1: peek at the top deck card without removing it.
+      const deck = state.decks[ownerIndex];
+      if (deck.length === 0) {
+        log("reveal_top_deck: deck empty");
+        break;
+      }
+      const topCard = deck[0];
+      state.revealTopDeckFor = { playerIndex: ownerIndex, card: topCard };
+      const topName = CARD_MAP.get(topCard.defId)?.name ?? topCard.defId;
+      log(`reveal_top_deck: revealed ${topCard.defId} (${topName}) to player ${ownerIndex}`);
+      state.effectQueue.unshift({
+        id: uuidv4(),
+        cardDefId,
+        cardName: effect.cardName,
+        type: "reveal_top_deck",
+        description: `Top card: ${topName} — keep or discard?`,
+        ownerIndex,
+        trigger,
+        payload: { awaitRead: true },
+      });
       break;
     }
 
@@ -1579,6 +1895,10 @@ export function executeEffect(
       const doFlip = (card: CardInstance, cardOwnerIdx: 0 | 1) => {
         // Check for on_covered_or_flip_delete_self — delete instead of flipping
         const flipDef = CARD_MAP.get(card.defId);
+        if (flipDef?.effects.some((e) => e.trigger === "passive" && e.type === "cannot_be_flipped")) {
+          log(`flip: ${card.defId} cannot be flipped`);
+          return;
+        }
         if (flipDef?.effects.some((e) => e.trigger === "passive" && e.type === "on_covered_or_flip_delete_self")) {
           for (const line of state.players[cardOwnerIdx].lines) {
             const idx = line.cards.findIndex((c) => c.instanceId === card.instanceId);
@@ -1649,8 +1969,86 @@ export function executeEffect(
         log("flip: cannot flip the source card (any_other)");
         break;
       }
+      if (targets === "opponent_in_last_target_line") {
+        if (flipOwnerIdx === ownerIndex || isCardCovered(state, targetId)) {
+          log("flip: target must be an opponent's uncovered card");
+          break;
+        }
+        const lastTargetId = state.lastTargetedInstanceId;
+        if (!lastTargetId) {
+          log("flip: no last targeted card for line comparison");
+          break;
+        }
+        let lastTargetLine = -1;
+        for (let li = 0; li < 3; li++) {
+          if (state.players[ownerIndex].lines[li].cards.some((c) => c.instanceId === lastTargetId)) {
+            lastTargetLine = li;
+            break;
+          }
+        }
+        if (lastTargetLine === -1) {
+          log("flip: last targeted card is not on the owner's side");
+          break;
+        }
+        const targetLine = state.players[oi].lines.findIndex((line) =>
+          line.cards.some((c) => c.instanceId === targetId),
+        );
+        if (targetLine !== lastTargetLine) {
+          log("flip: target must be in the same line as the last targeted card");
+          break;
+        }
+      }
+      if (targets === "self") {
+        if (!sourceInstanceId) {
+          log("flip: self target requires sourceInstanceId");
+          break;
+        }
+        if (targetId !== sourceInstanceId) {
+          log("flip: self target must be the source card");
+          break;
+        }
+      }
+      if (targets === "own_any" && flipOwnerIdx !== ownerIndex) {
+        log("flip: target must be your own uncovered card");
+        break;
+      }
       if (targets === "any_card" && isCardCovered(state, targetId)) {
         log("flip: target must be an uncovered card");
+        break;
+      }
+      if (targets === "any_faceup_uncovered" && (flipTarget.face !== CardFace.FaceUp || isCardCovered(state, targetId))) {
+        log("flip: target must be an uncovered face-up card");
+        break;
+      }
+      if (targets === "own_any" && isCardCovered(state, targetId)) {
+        log("flip: target must be an uncovered card");
+        break;
+      }
+      const minCountInField = payload.minCountInField as number | undefined;
+      const protocolId = payload.protocolId as string | undefined;
+      if (protocolId && minCountInField !== undefined) {
+        if (countCardsInFieldByProtocol(state, protocolId) < minCountInField) {
+          log(`flip: skipped (field has fewer than ${minCountInField} ${protocolId} card(s))`);
+          break;
+        }
+      }
+      const maxValueSource = payload.maxValueSource as string | undefined;
+      const valueComparison = (payload.valueComparison as string | undefined) ?? "lt";
+      if (maxValueSource === "distinct_protocols_in_field") {
+        const threshold = countDistinctProtocolsInField(state);
+        const cardValue = getEffectiveCardValue(flipTarget);
+        const allowed = valueComparison === "lte" ? cardValue <= threshold : cardValue < threshold;
+        if (!allowed) {
+          log(`flip: target value must be ${valueComparison === "lte" ? "at most" : "less than"} ${threshold}`);
+          break;
+        }
+      }
+      if (targets === "any_covered" && !isCardCovered(state, targetId)) {
+        log("flip: target must be a covered card");
+        break;
+      }
+      if (targets === "any_faceup_covered" && (flipTarget.face !== CardFace.FaceUp || !isCardCovered(state, targetId))) {
+        log("flip: target must be a face-up covered card");
         break;
       }
       if (targets === "any_other" && isCardCovered(state, targetId)) {
@@ -1727,6 +2125,7 @@ export function executeEffect(
       const targetId = payload.targetInstanceId as string | undefined;
       const targetLineIndex = payload.targetLineIndex as number | undefined;
       const toSourceLine = (payload.toSourceLine as boolean) ?? false;
+      const optional = (payload.optional as boolean) ?? false;
 
       // Helper: find a card across all lines, returns location info
       const findShiftCard = (id: string): { pi: 0 | 1; li: number; idx: number; card: CardInstance } | null => {
@@ -1803,6 +2202,23 @@ export function executeEffect(
         break;
       }
 
+      // self_if_covered: ice_3 — if source card is covered, shift it to the chosen line (optional)
+      if (targets === "self_if_covered") {
+        if (!sourceInstanceId) { log("shift self_if_covered: no sourceInstanceId"); break; }
+        if (!isCardCovered(state, sourceInstanceId)) {
+          log("shift self_if_covered: source card is not covered — skipped");
+          break;
+        }
+        const selfFound = findShiftCard(sourceInstanceId);
+        if (!selfFound) { log("shift self_if_covered: source card not found"); break; }
+        if (targetLineIndex === undefined || targetLineIndex < 0 || targetLineIndex > 2) {
+          if (optional) { log("shift self_if_covered: skipped (optional, no line chosen)"); break; }
+          log("shift self_if_covered: no valid targetLineIndex"); break;
+        }
+        doShift(selfFound, targetLineIndex);
+        break;
+      }
+
       // grv_1 (no targets): shift any own card to or from source line
       if (!targets) {
         if (!targetId) { log("shift: no targetInstanceId"); break; }
@@ -1831,7 +2247,14 @@ export function executeEffect(
       }
 
       // All remaining variants require targetId and targetLineIndex (unless toSourceLine overrides)
-      if (!targetId) { log("shift: no targetInstanceId"); break; }
+      if (!targetId) {
+        if (optional) {
+          log("shift: skipped (optional, no target chosen)");
+          break;
+        }
+        log("shift: no targetInstanceId");
+        break;
+      }
       const found = findShiftCard(targetId);
       if (!found) { log(`shift: card ${targetId} not found`); break; }
 
@@ -1840,7 +2263,21 @@ export function executeEffect(
         if (found.card.face !== CardFace.FaceDown || isCardCovered(state, found.card.instanceId)) { log("shift any_facedown: target must be uncovered face-down"); break; }
         const dest = toSourceLine ? srcLine : targetLineIndex;
         if (dest === undefined || dest < 0 || dest > 2) { log("shift any_facedown: no valid destination line"); break; }
-        doShift(found, dest);
+        doShift(found, dest!);
+        break;
+      }
+
+      if (targets === "any_uncovered") {
+        if (isCardCovered(state, found.card.instanceId)) { log("shift any_uncovered: target must be uncovered"); break; }
+        if (targetLineIndex === undefined || targetLineIndex < 0 || targetLineIndex > 2) { log("shift any_uncovered: no valid targetLineIndex"); break; }
+        doShift(found, targetLineIndex);
+        break;
+      }
+
+      if (targets === "covered_facedown") {
+        if (found.card.face !== CardFace.FaceDown || !isCardCovered(state, found.card.instanceId)) { log("shift covered_facedown: target must be covered face-down"); break; }
+        if (targetLineIndex === undefined || targetLineIndex < 0 || targetLineIndex > 2) { log("shift covered_facedown: no valid targetLineIndex"); break; }
+        doShift(found, targetLineIndex);
         break;
       }
 
@@ -1884,6 +2321,31 @@ export function executeEffect(
         break;
       }
 
+      if (targets === "any_other") {
+        if (found.card.instanceId === sourceInstanceId) { log("shift any_other: cannot shift source card"); break; }
+        if (isCardCovered(state, found.card.instanceId)) { log("shift any_other: target must be uncovered"); break; }
+        doShift(found, targetLineIndex);
+        break;
+      }
+
+      // own_covered: own covered (non-top) card — cha_2
+      if (targets === "own_covered") {
+        if (found.pi !== ownerIndex) { log("shift own_covered: must target own card"); break; }
+        if (!isCardCovered(state, found.card.instanceId)) { log("shift own_covered: target must be covered"); break; }
+        doShift(found, targetLineIndex);
+        break;
+      }
+
+      // opponent_in_source_line: uncovered opponent card in the source line — fea_3
+      if (targets === "opponent_in_source_line") {
+        if (srcLine < 0) { log("shift opponent_in_source_line: source line not found"); break; }
+        if (found.pi === ownerIndex) { log("shift opponent_in_source_line: must target opponent card"); break; }
+        if (found.li !== srcLine) { log("shift opponent_in_source_line: target must be in source line"); break; }
+        if (isCardCovered(state, found.card.instanceId)) { log("shift opponent_in_source_line: target must be uncovered"); break; }
+        doShift(found, targetLineIndex);
+        break;
+      }
+
       log(`shift: unknown targets variant "${targets}"`);
       break;
     }
@@ -1906,6 +2368,35 @@ export function executeEffect(
         }
       }
       if (!dcsSeen) log(`on_covered_delete_self: source ${sourceInstanceId} not found`);
+      for (const { card, amount: drawAmt } of scanPassives(state, ownerIndex, "after_delete_draw")) {
+        log(`after_delete_draw (${card.defId}): drawing ${drawAmt}`);
+        drawCards(state, ownerIndex, drawAmt);
+      }
+      break;
+    }
+
+    case "delete_self_if_covered": {
+      if (!sourceInstanceId) { log("delete_self_if_covered: no sourceInstanceId"); break; }
+      if (!isCardCovered(state, sourceInstanceId)) {
+        log("delete_self_if_covered: skipped (source is not covered)");
+        break;
+      }
+      let deleted = false;
+      for (let pi = 0; pi < 2; pi++) {
+        for (const line of state.players[pi].lines) {
+          const idx = line.cards.findIndex((c) => c.instanceId === sourceInstanceId);
+          if (idx !== -1) {
+            const [trashed] = line.cards.splice(idx, 1);
+            state.trashes[pi].push(trashed);
+            state.players[pi].trashSize = state.trashes[pi].length;
+            log(`delete_self_if_covered: deleted ${trashed.defId}`);
+            deleted = true;
+            break;
+          }
+        }
+        if (deleted) break;
+      }
+      if (!deleted) log("delete_self_if_covered: source card not found");
       for (const { card, amount: drawAmt } of scanPassives(state, ownerIndex, "after_delete_draw")) {
         log(`after_delete_draw (${card.defId}): drawing ${drawAmt}`);
         drawCards(state, ownerIndex, drawAmt);
@@ -2039,6 +2530,347 @@ export function executeEffect(
       ocdssDest.cards.push(savedCard);
       if (ocdssPrevTop) enqueueEffectsOnCover(state, ocdssPrevTop, ownerIndex);
       log(`on_compile_delete_shift_self: shifted ${savedCard.defId} to line ${ocdssTarget}`);
+      break;
+    }
+
+    case "discard_entire_deck": {
+      const deck = state.decks[ownerIndex];
+      const moved = deck.splice(0);
+      for (const card of moved) card.face = CardFace.FaceUp;
+      state.trashes[ownerIndex].push(...moved);
+      state.players[ownerIndex].deckSize = 0;
+      state.players[ownerIndex].trashSize = state.trashes[ownerIndex].length;
+      log(`discard_entire_deck: moved ${moved.length} card(s) to trash`);
+      break;
+    }
+
+    case "play_top_deck_facedown_then_flip": {
+      let placed = false;
+      for (let li = 0; li < 3; li++) {
+        if (!sourceInstanceId || !state.players[ownerIndex].lines[li].cards.some((c) => c.instanceId === sourceInstanceId)) continue;
+        const line = state.players[ownerIndex].lines[li];
+        const drawn = takeTopDeckCardNoReshuffle(state, ownerIndex, log);
+        if (!drawn) break;
+        drawn.face = CardFace.FaceDown;
+        const prevTop = line.cards.length > 0 ? line.cards[line.cards.length - 1] : null;
+        line.cards.push(drawn);
+        if (prevTop) enqueueEffectsOnCover(state, prevTop, ownerIndex);
+        drawn.face = CardFace.FaceUp;
+        enqueueEffectsOnFlipFaceUp(state, ownerIndex, drawn);
+        log(`play_top_deck_facedown_then_flip: played and flipped ${drawn.defId} in line ${li}`);
+        placed = true;
+        break;
+      }
+      if (!placed) log("play_top_deck_facedown_then_flip: source line not found or deck empty");
+      break;
+    }
+
+    case "top_deck_discard_draw_value": {
+      const discarded = takeTopDeckCardNoReshuffle(state, ownerIndex, log);
+      if (!discarded) break;
+      const wasFaceDown = discarded.face === CardFace.FaceDown;
+      discarded.face = CardFace.FaceUp;
+      state.trashes[ownerIndex].push(discarded);
+      state.players[ownerIndex].trashSize = state.trashes[ownerIndex].length;
+      const def = CARD_MAP.get(discarded.defId);
+      const amount = wasFaceDown ? FACE_DOWN_VALUE : (def?.value ?? FACE_DOWN_VALUE);
+      log(`top_deck_discard_draw_value: discarded ${discarded.defId}, drawing ${amount}`);
+      drawCards(state, ownerIndex, amount);
+      break;
+    }
+
+    case "top_deck_to_lines_with_facedown": {
+      let moved = 0;
+      for (let li = 0; li < 3; li++) {
+        const line = state.players[ownerIndex].lines[li];
+        if (!line.cards.some((card) => card.face === CardFace.FaceDown)) continue;
+        pushDeckCardFaceDown(state, ownerIndex, line, log);
+        moved++;
+      }
+      log(`top_deck_to_lines_with_facedown: played into ${moved} line(s)`);
+      break;
+    }
+
+    case "opponent_discard_hand_then_draw_minus": {
+      const hand = state.players[oi].hand.splice(0);
+      const discardedCount = hand.length;
+      for (const card of hand) card.face = CardFace.FaceUp;
+      state.trashes[oi].push(...hand);
+      state.players[oi].trashSize = state.trashes[oi].length;
+      const drawAmount = Math.max(0, discardedCount - 1);
+      log(`opponent_discard_hand_then_draw_minus: discarded ${discardedCount}, drawing ${drawAmount}`);
+      if (drawAmount > 0) drawCards(state, oi, drawAmount);
+      break;
+    }
+
+    case "opponent_discard_random": {
+      const amount = Math.min((payload.amount as number) ?? 1, state.players[oi].hand.length);
+      discardFromHand(state, oi, amount);
+      log(`opponent_discard_random: opponent discarded ${amount} random card(s)`);
+      break;
+    }
+
+    case "both_players_discard_hand": {
+      for (const pi of [0, 1] as const) {
+        const hand = state.players[pi].hand.splice(0);
+        for (const card of hand) card.face = CardFace.FaceUp;
+        state.trashes[pi].push(...hand);
+        state.players[pi].trashSize = state.trashes[pi].length;
+      }
+      log("both_players_discard_hand: both hands discarded");
+      break;
+    }
+
+    case "discard_hand_then_draw_same": {
+      const hand = state.players[ownerIndex].hand.splice(0);
+      const count = hand.length;
+      for (const card of hand) card.face = CardFace.FaceUp;
+      state.trashes[ownerIndex].push(...hand);
+      state.players[ownerIndex].trashSize = state.trashes[ownerIndex].length;
+      log(`discard_hand_then_draw_same: discarded ${count}, drawing ${count}`);
+      if (count > 0) drawCards(state, ownerIndex, count);
+      break;
+    }
+
+    case "reshuffle_trash": {
+      const trash = state.trashes[ownerIndex];
+      if (trash.length === 0) { log("reshuffle_trash: trash is already empty"); break; }
+      const reshuffled = shuffle(trash.splice(0));
+      reshuffled.forEach((c) => (c.face = CardFace.FaceDown));
+      state.decks[ownerIndex].push(...reshuffled);
+      state.players[ownerIndex].deckSize = state.decks[ownerIndex].length;
+      state.players[ownerIndex].trashSize = 0;
+      log(`reshuffle_trash: shuffled ${reshuffled.length} card(s) from trash into deck`);
+      break;
+    }
+
+    case "swap_top_deck_draws": {
+      // Both players draw the top card of the opponent's deck (cha_0 start, asm_4)
+      const topForOi = takeTopDeckCardNoReshuffle(state, oi, log);
+      const topForOwner = takeTopDeckCardNoReshuffle(state, ownerIndex, log);
+      if (topForOi) {
+        topForOi.face = CardFace.FaceUp;
+        state.players[ownerIndex].hand.push(topForOi);
+        log(`swap_top_deck_draws: P${ownerIndex} drew ${topForOi.defId} from P${oi}'s deck`);
+      }
+      if (topForOwner) {
+        topForOwner.face = CardFace.FaceUp;
+        state.players[oi].hand.push(topForOwner);
+        log(`swap_top_deck_draws: P${oi} drew ${topForOwner.defId} from P${ownerIndex}'s deck`);
+      }
+      break;
+    }
+
+    case "flip_covered_in_each_line": {
+      // cha_0 immediate: in each line, flip 1 covered card (the deepest covered card)
+      let flipped = 0;
+      for (let pi = 0; pi < 2; pi++) {
+        for (let li = 0; li < 3; li++) {
+          const line = state.players[pi as 0 | 1].lines[li];
+          if (line.cards.length < 2) continue;
+          const covered = line.cards.slice(0, line.cards.length - 1);
+          if (covered.length === 0) continue;
+          const target = covered[0]; // deepest covered card
+          const wasDown = target.face === CardFace.FaceDown;
+          target.face = wasDown ? CardFace.FaceUp : CardFace.FaceDown;
+          log(`flip_covered_in_each_line: P${pi} L${li} flipped ${target.defId} to ${target.face}`);
+          if (wasDown) enqueueEffectsOnFlipFaceUp(state, pi as 0 | 1, target);
+          flipped++;
+        }
+      }
+      log(`flip_covered_in_each_line: flipped ${flipped} card(s)`);
+      break;
+    }
+
+    case "flip_self_if_opponent_higher_in_line": {
+      if (!sourceInstanceId) { log("flip_self_if_opponent_higher_in_line: no sourceInstanceId"); break; }
+      let flSrcLine = -1;
+      for (let li = 0; li < 3; li++) {
+        if (state.players[ownerIndex].lines[li].cards.some((c) => c.instanceId === sourceInstanceId)) {
+          flSrcLine = li; break;
+        }
+      }
+      if (flSrcLine === -1) { log("flip_self_if_opponent_higher_in_line: source line not found"); break; }
+      if (lineValue(state, oi, flSrcLine) > lineValue(state, ownerIndex, flSrcLine)) {
+        log("flip_self_if_opponent_higher_in_line: condition met — flipping self");
+        flipSourceCard(state, sourceInstanceId, log);
+      } else {
+        log("flip_self_if_opponent_higher_in_line: skipped (opponent not higher)");
+      }
+      break;
+    }
+
+    case "discard_or_delete_self": {
+      // cor_6: discard 1 hand card OR (if no card chosen) delete source
+      const targetId = payload.targetInstanceId as string | undefined;
+      if (targetId) {
+        const hand = state.players[ownerIndex].hand;
+        const idx = hand.findIndex((c) => c.instanceId === targetId);
+        if (idx === -1) { log(`discard_or_delete_self: ${targetId} not in hand — deleting self`); }
+        else {
+          const [discarded] = hand.splice(idx, 1);
+          discarded.face = CardFace.FaceUp;
+          state.trashes[ownerIndex].push(discarded);
+          state.players[ownerIndex].trashSize = state.trashes[ownerIndex].length;
+          log(`discard_or_delete_self: discarded ${discarded.defId}`);
+          break;
+        }
+      }
+      // No discard target — delete the source card
+      if (!sourceInstanceId) { log("discard_or_delete_self: no sourceInstanceId for delete fallback"); break; }
+      outerDODS: for (let pi = 0; pi < 2; pi++) {
+        for (const line of state.players[pi as 0 | 1].lines) {
+          const idx = line.cards.findIndex((c) => c.instanceId === sourceInstanceId);
+          if (idx !== -1) {
+            const [trashed] = line.cards.splice(idx, 1);
+            trashed.face = CardFace.FaceUp;
+            state.trashes[pi].push(trashed);
+            state.players[pi].trashSize = state.trashes[pi].length;
+            log(`discard_or_delete_self: deleted ${trashed.defId}`);
+            break outerDODS;
+          }
+        }
+      }
+      break;
+    }
+
+    case "take_opponent_facedown_to_hand": {
+      // asm_0: grab 1 of the opponent's face-down cards (covered or uncovered) to own hand
+      const targetId = payload.targetInstanceId as string | undefined;
+      if (!targetId) { log("take_opponent_facedown_to_hand: no target"); break; }
+      outerTOF: for (const line of state.players[oi].lines) {
+        const idx = line.cards.findIndex((c) => c.instanceId === targetId);
+        if (idx !== -1) {
+          if (line.cards[idx].face !== CardFace.FaceDown) {
+            log("take_opponent_facedown_to_hand: target must be face-down"); break outerTOF;
+          }
+          const [taken] = line.cards.splice(idx, 1);
+          taken.face = CardFace.FaceUp;
+          state.players[ownerIndex].hand.push(taken);
+          log(`take_opponent_facedown_to_hand: took ${taken.defId} from opponent`);
+          break outerTOF;
+        }
+      }
+      break;
+    }
+
+    case "delete_in_winning_line": {
+      // crg_1: delete 1 opponent card in a line where opponent has higher total value
+      const targetId = payload.targetInstanceId as string | undefined;
+      if (!targetId) { log("delete_in_winning_line: no target"); break; }
+      outerDIW: for (let li = 0; li < 3; li++) {
+        const line = state.players[oi].lines[li];
+        const idx = line.cards.findIndex((c) => c.instanceId === targetId);
+        if (idx !== -1) {
+          if (lineValue(state, oi, li) <= lineValue(state, ownerIndex, li)) {
+            log(`delete_in_winning_line: opponent does not have higher value in line ${li} — rejected`);
+            break outerDIW;
+          }
+          if (isCardCovered(state, targetId)) { log("delete_in_winning_line: target must be uncovered"); break outerDIW; }
+          const [trashed] = line.cards.splice(idx, 1);
+          trashed.face = CardFace.FaceUp;
+          state.trashes[oi].push(trashed);
+          state.players[oi].trashSize = state.trashes[oi].length;
+          log(`delete_in_winning_line: deleted ${trashed.defId} from P${oi} line ${li}`);
+          for (const { card, amount: drawAmt } of scanPassives(state, ownerIndex, "after_delete_draw")) {
+            log(`after_delete_draw: drawing ${drawAmt}`); drawCards(state, ownerIndex, drawAmt);
+          }
+          break outerDIW;
+        }
+      }
+      break;
+    }
+
+    case "shift_self_to_best_opponent_line": {
+      // crg_3: auto-shift source card to the line where opponent has highest total value
+      if (!sourceInstanceId) { log("shift_self_to_best_opponent_line: no sourceInstanceId"); break; }
+      let selfLoc: { li: number; idx: number } | null = null;
+      for (let li = 0; li < 3; li++) {
+        const idx = state.players[ownerIndex].lines[li].cards.findIndex((c) => c.instanceId === sourceInstanceId);
+        if (idx !== -1) { selfLoc = { li, idx }; break; }
+      }
+      if (!selfLoc) { log("shift_self_to_best_opponent_line: source not found in own lines"); break; }
+      let bestLine = 0, bestVal = -Infinity;
+      for (let li = 0; li < 3; li++) {
+        const v = lineValue(state, oi, li);
+        if (v > bestVal) { bestVal = v; bestLine = li; }
+      }
+      if (selfLoc.li === bestLine) { log("shift_self_to_best_opponent_line: already in best line"); break; }
+      const [moved] = state.players[ownerIndex].lines[selfLoc.li].cards.splice(selfLoc.idx, 1);
+      const destLine = state.players[ownerIndex].lines[bestLine];
+      const prevTop = destLine.cards.length > 0 ? destLine.cards[destLine.cards.length - 1] : null;
+      destLine.cards.push(moved);
+      if (prevTop) enqueueEffectsOnCover(state, prevTop, ownerIndex);
+      log(`shift_self_to_best_opponent_line: shifted ${moved.defId} to line ${bestLine} (opp val ${bestVal})`);
+      break;
+    }
+
+    case "discard_then_opponent_discard": {
+      // crg_0 end: optionally discard 1 own card; if discarded, opponent also discards 1
+      const targetId = payload.targetInstanceId as string | undefined;
+      if (!targetId) {
+        log("discard_then_opponent_discard: skipped (no card chosen)");
+        break;
+      }
+      const hand = state.players[ownerIndex].hand;
+      const idx = hand.findIndex((c) => c.instanceId === targetId);
+      if (idx === -1) { log(`discard_then_opponent_discard: ${targetId} not in hand`); break; }
+      const [discarded] = hand.splice(idx, 1);
+      discarded.face = CardFace.FaceUp;
+      state.trashes[ownerIndex].push(discarded);
+      state.players[ownerIndex].trashSize = state.trashes[ownerIndex].length;
+      log(`discard_then_opponent_discard: discarded ${discarded.defId} — queuing opponent discard`);
+      state.effectQueue.push({
+        id: uuidv4(), cardDefId, cardName: effect.cardName,
+        type: "discard", description: "Choose a card to discard.",
+        ownerIndex: oi, trigger: effect.trigger, payload: {},
+        sourceInstanceId,
+      });
+      break;
+    }
+
+    case "delete_self_if_field_protocols_below": {
+      const minDistinct = (payload.minDistinct as number) ?? 4;
+      const distinct = countDistinctProtocolsInField(state);
+      if (distinct >= minDistinct) {
+        log(`delete_self_if_field_protocols_below: skipped (${distinct} distinct protocol(s), need < ${minDistinct})`);
+        break;
+      }
+      if (!sourceInstanceId) {
+        log("delete_self_if_field_protocols_below: no sourceInstanceId");
+        break;
+      }
+      let deleted = false;
+      outerDS: for (let pi = 0; pi < 2; pi++) {
+        for (const line of state.players[pi as 0 | 1].lines) {
+          const idx = line.cards.findIndex((c) => c.instanceId === sourceInstanceId);
+          if (idx === -1) continue;
+          const [trashed] = line.cards.splice(idx, 1);
+          trashed.face = CardFace.FaceUp;
+          state.trashes[pi].push(trashed);
+          state.players[pi].trashSize = state.trashes[pi].length;
+          log(`delete_self_if_field_protocols_below: deleted ${trashed.defId} (${distinct} distinct protocol(s))`);
+          deleted = true;
+          break outerDS;
+        }
+      }
+      if (!deleted) log("delete_self_if_field_protocols_below: source not found");
+      break;
+    }
+
+    case "draw_per_protocol_cards_in_field": {
+      const protocolId = payload.protocolId as string | undefined;
+      if (!protocolId) {
+        log("draw_per_protocol_cards_in_field: missing protocolId");
+        break;
+      }
+      const amount = countCardsInFieldByProtocol(state, protocolId);
+      if (amount <= 0) {
+        log(`draw_per_protocol_cards_in_field: no ${protocolId} cards in field`);
+        break;
+      }
+      log(`draw_per_protocol_cards_in_field: drawing ${amount} for protocol ${protocolId}`);
+      drawCards(state, ownerIndex, amount);
       break;
     }
 

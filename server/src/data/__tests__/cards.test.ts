@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { PROTOCOLS, COMMAND_CARDS, PROTOCOL_MAP, CARD_MAP } from "../cards";
+import { ProtocolSet } from "@compile/shared";
+import { PROTOCOLS, COMMAND_CARDS, PROTOCOL_MAP, CARD_MAP, MAIN_UNIT_2_IDS } from "../cards";
 
 const VALID_TRIGGERS = new Set(["immediate", "start", "end", "passive"]);
 
@@ -16,6 +17,24 @@ const KNOWN_EFFECT_TYPES = new Set([
   "delete", "delete_highest_both", "draw_then_delete_self",
   "discard_to_delete", "discard_to_return", "discard_to_draw", "discard_to_flip",
   "discard_to_opp_discard_more", "reveal_hand", "swap_protocols",
+  "ocr_unimplemented",
+  "value_bonus_if_other_faceup_not_protocol_in_stack", "play_top_deck_facedown_then_flip",
+  "top_deck_discard_draw_value", "top_deck_to_lines_with_facedown",
+  "value_bonus_per_hand_card", "on_covered_draw", "discard_entire_deck",
+  "opponent_discard_hand_then_draw_minus", "opponent_discard_random",
+  "cannot_be_flipped", "discard_hand_then_draw_same", "value_bonus_per_opponent_card_in_line",
+  "both_players_discard_hand", "draw_if_hand_empty", "flip_self_if_hand_gt",
+  "draw_if_opponent_higher_in_line",
+  "reshuffle_trash", "swap_top_deck_draws", "flip_covered_in_each_line",
+  "flip_self_if_opponent_higher_in_line", "discard_or_delete_self",
+  "take_opponent_facedown_to_hand", "delete_in_winning_line",
+  "shift_self_to_best_opponent_line", "discard_then_opponent_discard",
+  "delete_self_if_field_protocols_below",
+  "draw_per_protocol_cards_in_field",
+  "draw_per_distinct_protocols_in_source_line",
+  "draw_all_protocol_from_deck_if_hand_empty",
+  "draw_value_from_deck_then_shuffle",
+  "trash_to_other_line_facedown",
   // Stubbed (known, not yet implemented)
   "shift", "play_card", "play_any_line",
   "flip_draw_equal", "reveal_shift_or_flip", "reveal_own_hand",
@@ -25,6 +44,7 @@ const KNOWN_EFFECT_TYPES = new Set([
   "reduce_opponent_value", "on_covered_delete_lowest",
   "after_delete_draw", "on_compile_delete_shift_self", "after_draw_shift_self",
   "facedown_value_override", "on_covered", "on_covered_delete_self",
+  "delete_self_if_covered",
   "on_covered_deck_to_other_line", "deny_facedown", "on_covered_or_flip_delete_self",
   "deny_play_in_line", "after_opp_discard_draw", "deny_faceup", "after_clear_cache_draw",
 ]);
@@ -37,11 +57,21 @@ describe("PROTOCOLS", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("every protocol has a non-empty id, name, and description", () => {
+  it("every protocol has a non-empty id, name, description, and set", () => {
     for (const p of PROTOCOLS) {
       expect(p.id, `${p.id}.id`).toBeTruthy();
       expect(p.name, `${p.id}.name`).toBeTruthy();
       expect(p.description, `${p.id}.description`).toBeTruthy();
+      expect(p.set, `${p.id}.set`).toBeTruthy();
+      expect(Object.values(ProtocolSet)).toContain(p.set);
+    }
+  });
+
+  it("Main Unit 2 protocol ids are tagged as Main Unit 2", () => {
+    for (const p of PROTOCOLS) {
+      if (MAIN_UNIT_2_IDS.has(p.id)) {
+        expect(p.set, `${p.id}.set`).toBe(ProtocolSet.MainUnit2);
+      }
     }
   });
 
@@ -125,6 +155,32 @@ describe("card effects", () => {
       }
     }
     expect(unknown, `Unknown effect types:\n${unknown.join("\n")}`).toHaveLength(0);
+  });
+
+  it("dth_0 deletes from each other line", () => {
+    const dth0 = CARD_MAP.get("dth_0");
+
+    expect(dth0).toBeTruthy();
+    expect(dth0?.effects).toHaveLength(1);
+    expect(dth0?.effects[0]).toMatchObject({
+      trigger: "immediate",
+      type: "delete",
+      description: "Delete 1 card from each other line.",
+      payload: { targets: "each_other_line" },
+    });
+  });
+
+  it("psy_3 has only one immediate opponent_discard effect", () => {
+    const psy3 = CARD_MAP.get("psy_3");
+
+    expect(psy3).toBeTruthy();
+    expect(psy3?.effects).toHaveLength(1);
+    expect(psy3?.effects[0]).toMatchObject({
+      trigger: "immediate",
+      type: "opponent_discard",
+      description: "Your opponent discards 1 card.",
+      payload: { amount: 1 },
+    });
   });
 });
 

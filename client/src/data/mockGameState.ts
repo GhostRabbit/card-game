@@ -73,8 +73,11 @@ export function createMockView(): { view: PlayerView; turnPhase: TurnPhase } {
     opponentPendingEffect: null,
     opponentHandRevealed: null,
     opponentRevealedHandCard: null,
+    ownRevealedTopDeckCard: null,
     pendingBonusPlay: null,
+    lastTargetedInstanceId: null,
     pendingControlReorder: false,
+    compileDeniedThisTurn: false,
     lineValues: [3, 0, 4],
     opponentLineValues: [3, 9, 0],
   };
@@ -210,8 +213,11 @@ export function createRandomizedMockView(): { view: PlayerView; turnPhase: TurnP
     opponentPendingEffect: null,
     opponentHandRevealed: null,
     opponentRevealedHandCard: null,
+    ownRevealedTopDeckCard: null,
     pendingBonusPlay: null,
+    lastTargetedInstanceId: null,
     pendingControlReorder: false,
+    compileDeniedThisTurn: false,
     lineValues,
     opponentLineValues,
   };
@@ -237,6 +243,11 @@ const EFFECT_CATALOGUE: Record<string, PendingEffect> = {
     description: "You discard 1 card.", ownerIndex: 0, trigger: "immediate",
     payload: { amount: 1 },
   },
+  cache_discard: {
+    id: "mock-eff-1", cardDefId: "cache_discard", cardName: "Cache", type: "discard",
+    description: "Choose a card to discard for Cache.", ownerIndex: 0, trigger: "immediate",
+    payload: { reason: "cache" },
+  },
   flip: {
     id: "mock-eff-1", cardDefId: "apy_3", cardName: "Apathy", type: "flip",
     description: "Flip 1 of your opponent's face-up cards.", ownerIndex: 0, trigger: "immediate",
@@ -251,6 +262,16 @@ const EFFECT_CATALOGUE: Record<string, PendingEffect> = {
     id: "mock-eff-1", cardDefId: "hat_0", cardName: "Hate", type: "delete",
     description: "Delete 1 card.", ownerIndex: 0, trigger: "immediate",
     payload: { targets: "any_card" },
+  },
+  plg4_delete_opponent_facedown: {
+    id: "mock-eff-1", cardDefId: "plg_4", cardName: "Plague", type: "delete",
+    description: "Your opponent deletes 1 of their face-down cards.", ownerIndex: 0, trigger: "end",
+    payload: { targets: "opponent_facedown" }, sourceInstanceId: "l0a",
+  },
+  plg4_flip_self_optional: {
+    id: "mock-eff-2", cardDefId: "plg_4", cardName: "Plague", type: "flip",
+    description: "You may flip this card.", ownerIndex: 0, trigger: "end",
+    payload: { targets: "self", optional: true }, sourceInstanceId: "l0a",
   },
   shift: {
     id: "mock-eff-1", cardDefId: "spd_3", cardName: "Speed", type: "shift",
@@ -267,10 +288,19 @@ const EFFECT_CATALOGUE: Record<string, PendingEffect> = {
     description: "Take 1 random card from your opponent's hand. Give 1 card from your hand to your opponent.",
     ownerIndex: 0, trigger: "immediate", payload: {},
   },
+  exchange_hand_give: {
+    id: "mock-eff-1", cardDefId: "lov_3", cardName: "Love", type: "exchange_hand",
+    description: "Give 1 card from your hand to your opponent.",
+    ownerIndex: 0, trigger: "immediate", payload: { awaitGive: true },
+  },
   give_to_draw: {
     id: "mock-eff-1", cardDefId: "lov_1", cardName: "Love", type: "give_to_draw",
     description: "You may give 1 card from your hand to your opponent. If you do, draw 2 cards.",
     ownerIndex: 0, trigger: "end", payload: {},
+  },
+  discard_or_flip_self: {
+    id: "mock-eff-1", cardDefId: "spr_1", cardName: "Spirit", type: "discard_or_flip_self",
+    description: "Either discard 1 card or flip this card.", ownerIndex: 0, trigger: "start", payload: {},
   },
   reveal_own_hand: {
     id: "mock-eff-1", cardDefId: "lov_4", cardName: "Love", type: "reveal_own_hand",

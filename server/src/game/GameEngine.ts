@@ -38,6 +38,8 @@ export interface ServerGameState extends GameState {
   revealOpponentHandFor: 0 | 1 | null;
   /** When set, the specified viewer can see one specific hand card of the opponent */
   revealHandCardFor: { viewerIndex: 0 | 1; cardId: string } | null;
+  /** When set, that player's own top deck card is temporarily revealed (awaiting read-confirm) */
+  revealTopDeckFor: { playerIndex: 0 | 1; card: CardInstance } | null;
   /** When set, the active player has a bonus card play (from play_card / play_any_line) */
   pendingBonusPlay: { anyLine: boolean } | null;
   /** The instanceId of the last card targeted by a flip or similar targeting effect this turn */
@@ -70,6 +72,7 @@ export function createServerGameState(
       compileDeniedThisTurn: false,
     revealOpponentHandFor: null,
     revealHandCardFor: null,
+    revealTopDeckFor: null,
     pendingBonusPlay: null,
     lastTargetedInstanceId: null,
     compileSavedCards: [],
@@ -113,6 +116,9 @@ export const FACE_DOWN_VALUE = 2;
  *   - `facedown_value_override`   (drk_2): each face-down card counts as payload.value instead of 2
  *   - `reduce_opponent_value`     (mtl_0): opponent's total reduced by payload.amount
  *                                           (applied when computing the *opponent's* value for this line)
+ *   - `value_bonus_per_hand_card`  (clr_0): +1 per card in the owner's hand
+ *   - `value_bonus_per_opponent_card_in_line` (mir_0): +payload.amount per opponent card in this line
+ *   - `value_bonus_if_other_faceup_not_protocol_in_stack` (div_2): +payload.amount if a different face-up protocol exists in the stack
  */
 export function lineValue(state: ServerGameState, playerIndex: 0 | 1, lineIndex: number): number {
   const cards = state.players[playerIndex].lines[lineIndex].cards;
@@ -122,6 +128,9 @@ export function lineValue(state: ServerGameState, playerIndex: 0 | 1, lineIndex:
   // Gather passive modifiers from the player's own face-up cards in this line
   let bonusPerFaceDown = 0;
   let faceDownOverride: number | null = null;
+  let bonusPerHandCard = 0;
+  let bonusPerOpponentCard = 0;
+  let conditionalProtocolBonus = 0;
   for (const card of cards) {
     if (card.face !== CardFace.FaceUp) continue;
     const def = CARD_MAP.get(card.defId);
@@ -129,6 +138,22 @@ export function lineValue(state: ServerGameState, playerIndex: 0 | 1, lineIndex:
     for (const effect of def.effects) {
       if (effect.trigger !== "passive") continue;
       if (effect.type === "value_bonus_per_facedown") bonusPerFaceDown += 1;
+      if (effect.type === "value_bonus_per_hand_card") bonusPerHandCard += 1;
+      if (effect.type === "value_bonus_per_opponent_card_in_line") {
+        const amount = typeof effect.payload?.amount === "number" ? effect.payload.amount : 1;
+        bonusPerOpponentCard += amount;
+      }
+      if (effect.type === "value_bonus_if_other_faceup_not_protocol_in_stack") {
+        const protocolId = typeof effect.payload?.protocolId === "string" ? effect.payload.protocolId : def.protocolId;
+        const hasOtherFaceUpProtocol = cards.some((candidate) => {
+          if (candidate.instanceId === card.instanceId || candidate.face !== CardFace.FaceUp) return false;
+          const candidateDef = CARD_MAP.get(candidate.defId);
+          return !!candidateDef && candidateDef.protocolId !== protocolId;
+        });
+        if (hasOtherFaceUpProtocol) {
+          conditionalProtocolBonus += typeof effect.payload?.amount === "number" ? effect.payload.amount : 2;
+        }
+      }
       if (effect.type === "facedown_value_override") {
         const v = typeof effect.payload?.value === "number" ? effect.payload.value : FACE_DOWN_VALUE;
         faceDownOverride = faceDownOverride === null ? v : Math.max(faceDownOverride, v);
@@ -147,6 +172,9 @@ export function lineValue(state: ServerGameState, playerIndex: 0 | 1, lineIndex:
 
   // value_bonus_per_facedown
   total += bonusPerFaceDown * faceDownCount;
+  total += bonusPerHandCard * state.players[playerIndex].hand.length;
+  total += bonusPerOpponentCard * oppCards.length;
+  total += conditionalProtocolBonus;
 
   // reduce_opponent_value — applied by the *opponent*'s cards against this player's total
   for (const oppCard of oppCards) {
@@ -435,6 +463,7 @@ export function endTurn(state: ServerGameState): void {
 export function finishTurn(state: ServerGameState): void {
   state.revealOpponentHandFor = null;
   state.revealHandCardFor = null;
+  state.revealTopDeckFor = null;
   state.pendingControlReorder = null;
   state.pendingBonusPlay = null;
   state.lastTargetedInstanceId = null;

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { CardFace, CardView, PlayerView, ProtocolStatus } from "@compile/shared";
 import { CARD_DEFS_CLIENT, PROTOCOL_ACCENT_COLORS, PROTOCOL_COLORS, PROTOCOL_NAMES_CLIENT } from "../../data/cardDefs";
+import { CardSprite } from "../../objects/CardSprite";
 
 export type FocusTurnState = "START" | "CONTROL" | "COMPILE" | "ACTION" | "CACHE" | "END";
 
@@ -31,9 +32,9 @@ export function renderFocusTurnState(
   const { focusPanelCx: cx, focusPanelW: pw, H } = layout;
 
   addToFocusPanel(scene, group,
-    scene.add.rectangle(cx, H / 2, pw, H, 0x070b11).setStrokeStyle(1, 0x18283a));
+    scene.add.rectangle(cx, H / 2, pw, H, 0x112338).setStrokeStyle(1.5, 0x426a8b));
   addToFocusPanel(scene, group, scene.add.text(cx, 30, "PHASE", {
-    fontSize: "11px", fontFamily: "monospace", color: "#2a4d72", fontStyle: "bold",
+    fontSize: "11px", fontFamily: "monospace", color: "#79b8e9", fontStyle: "bold",
   }).setOrigin(0.5, 0));
 
   const summaries: Record<FocusTurnState, string> = {
@@ -46,13 +47,13 @@ export function renderFocusTurnState(
   };
 
   addToFocusPanel(scene, group, scene.add.text(cx, H / 2 - 80, state, {
-    fontSize: "28px", fontFamily: "monospace", fontStyle: "bold", color: "#9ec7ea",
+    fontSize: "28px", fontFamily: "monospace", fontStyle: "bold", color: "#def5ff",
   }).setOrigin(0.5));
 
   addToFocusPanel(scene, group, scene.add.text(cx, H / 2 - 10, summaries[state], {
     fontSize: "13px",
     fontFamily: "monospace",
-    color: "#a9bfcd",
+    color: "#d3e4f1",
     align: "center",
     wordWrap: { width: pw - 20 },
   }).setOrigin(0.5, 0));
@@ -68,9 +69,9 @@ export function renderFocusControlToken(
   const { focusPanelCx: cx, focusPanelW: pw, H } = layout;
 
   addToFocusPanel(scene, group,
-    scene.add.rectangle(cx, H / 2, pw, H, 0x070b11).setStrokeStyle(1, 0x18283a));
+    scene.add.rectangle(cx, H / 2, pw, H, 0x112338).setStrokeStyle(1.5, 0x426a8b));
   addToFocusPanel(scene, group, scene.add.text(cx, 10, "CONTROL TOKEN", {
-    fontSize: "18px", fontFamily: "monospace", color: "#1a3355",
+    fontSize: "18px", fontFamily: "monospace", color: "#79b8e9",
   }).setOrigin(0.5, 0));
 
   const tokenActive = hasControl || opponentHasControl;
@@ -98,7 +99,7 @@ export function renderFocusControlToken(
   addToFocusPanel(scene, group, scene.add.text(cx, tokenCy + tokenSize / 2 + 48, rules, {
     fontSize: "12px",
     fontFamily: "monospace",
-    color: "#a9bfcd",
+    color: "#d3e4f1",
     align: "center",
     wordWrap: { width: pw - 26 },
   }).setOrigin(0.5, 0));
@@ -115,9 +116,9 @@ export function renderFocusProtocol(
   const { focusPanelCx: cx, focusPanelW: pw, H } = layout;
 
   addToFocusPanel(scene, group,
-    scene.add.rectangle(cx, H / 2, pw, H, 0x070b11).setStrokeStyle(1, 0x18283a));
+    scene.add.rectangle(cx, H / 2, pw, H, 0x112338).setStrokeStyle(1.5, 0x426a8b));
   addToFocusPanel(scene, group, scene.add.text(cx, 10, `LINE ${lineIndex}`, {
-    fontSize: "9px", fontFamily: "monospace", color: "#2a4d72", fontStyle: "bold",
+    fontSize: "9px", fontFamily: "monospace", color: "#79b8e9", fontStyle: "bold",
   }).setOrigin(0.5, 0));
 
   const ownVal = view.lineValues[lineIndex];
@@ -216,9 +217,9 @@ export function renderFocusCardPanel(
   const { focusPanelCx: cx, focusPanelW: pw, H } = layout;
 
   addToFocusPanel(scene, group,
-    scene.add.rectangle(cx, H / 2, pw, H, 0x070b11).setStrokeStyle(1, 0x18283a));
+    scene.add.rectangle(cx, H / 2, pw, H, 0x112338).setStrokeStyle(1.5, 0x426a8b));
   addToFocusPanel(scene, group, scene.add.text(cx, 10, "CARD DETAIL", {
-    fontSize: "9px", fontFamily: "monospace", color: "#1a3355",
+    fontSize: "9px", fontFamily: "monospace", color: "#79b8e9",
   }).setOrigin(0.5, 0));
 
   if (!card) {
@@ -227,16 +228,36 @@ export function renderFocusCardPanel(
       addToFocusPanel(scene, group, scene.add.text(cx, H / 2 - 155, "OPP REVEALED", {
         fontSize: "11px", fontFamily: "monospace", color: "#ffaa44", fontStyle: "bold",
       }).setOrigin(0.5));
-      buildFocusCard(scene, group, cx, H / 2, revealedCard, 200, 280);
+      buildFocusCard(scene, group, cx, H / 2, revealedCard, 200, 280, false);
     } else {
       addToFocusPanel(scene, group, scene.add.text(cx, H / 2, "hover a card\nto inspect", {
-        fontSize: "12px", fontFamily: "monospace", color: "#1a3355", align: "center",
+        fontSize: "12px", fontFamily: "monospace", color: "#8fb5d3", align: "center",
       }).setOrigin(0.5));
     }
     return;
   }
 
-  buildFocusCard(scene, group, cx, H / 2, card, 200, 280);
+  const focusedCovered = isFocusedCardCovered(view, card);
+  buildFocusCard(scene, group, cx, H / 2, card, 200, 280, focusedCovered);
+}
+
+function isFocusedCardCovered(view: PlayerView, card: CardView): boolean {
+  if ("hidden" in card) return false;
+  const focusedId = card.instanceId;
+
+  const lineSets = [
+    ...view.lines.map((l) => l.cards),
+    ...view.opponentLines.map((l) => l.cards),
+  ];
+
+  for (const cards of lineSets) {
+    const idx = cards.findIndex((c) => ("hidden" in c ? false : c.instanceId === focusedId));
+    if (idx >= 0) {
+      return idx < cards.length - 1;
+    }
+  }
+
+  return false;
 }
 
 function buildFocusCard(
@@ -247,157 +268,24 @@ function buildFocusCard(
   card: CardView,
   w: number,
   h: number,
+  covered: boolean,
 ): void {
-  const shade = (color: number, factor: number): number => {
-    const r = Math.max(0, Math.min(255, Math.floor(((color >> 16) & 0xff) * factor)));
-    const g = Math.max(0, Math.min(255, Math.floor(((color >> 8) & 0xff) * factor)));
-    const b = Math.max(0, Math.min(255, Math.floor((color & 0xff) * factor)));
-    return (r << 16) | (g << 8) | b;
-  };
-  const oppositeHueCss = (color: number): string => {
-    const r = ((color >> 16) & 0xff) / 255;
-    const g = ((color >> 8) & 0xff) / 255;
-    const b = (color & 0xff) / 255;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const delta = max - min;
+  const scale = Math.min(w / CardSprite.WIDTH, h / CardSprite.HEIGHT);
+  const borderPad = Math.max(3, Math.round(4 * scale));
+  const cardW = Math.round(CardSprite.WIDTH * scale);
+  const cardH = Math.round(CardSprite.HEIGHT * scale);
 
-    let hDeg = 0;
-    let sat = 0;
-    const light = (max + min) / 2;
-
-    if (delta !== 0) {
-      sat = delta / (1 - Math.abs(2 * light - 1));
-      if (max === r) hDeg = ((g - b) / delta) % 6;
-      else if (max === g) hDeg = (b - r) / delta + 2;
-      else hDeg = (r - g) / delta + 4;
-      hDeg *= 60;
-      if (hDeg < 0) hDeg += 360;
-    }
-
-    const oppositeHue = (hDeg + 180) % 360;
-    const outSat = Math.max(0.45, sat);
-    const outLight = light < 0.5 ? 0.86 : 0.34;
-
-    const c = (1 - Math.abs(2 * outLight - 1)) * outSat;
-    const hp = oppositeHue / 60;
-    const x = c * (1 - Math.abs((hp % 2) - 1));
-    let rr = 0;
-    let gg = 0;
-    let bb = 0;
-
-    if (hp >= 0 && hp < 1) {
-      rr = c; gg = x;
-    } else if (hp < 2) {
-      rr = x; gg = c;
-    } else if (hp < 3) {
-      gg = c; bb = x;
-    } else if (hp < 4) {
-      gg = x; bb = c;
-    } else if (hp < 5) {
-      rr = x; bb = c;
-    } else {
-      rr = c; bb = x;
-    }
-
-    const m = outLight - c / 2;
-    const outR = Math.round((rr + m) * 255);
-    const outG = Math.round((gg + m) * 255);
-    const outB = Math.round((bb + m) * 255);
-    const out = (outR << 16) | (outG << 8) | outB;
-    return `#${out.toString(16).padStart(6, "0")}`;
-  };
-
-  const isHidden = "hidden" in card;
-  const isFaceDown = isHidden || (!isHidden && (card as any).face === CardFace.FaceDown);
-  const defId = !isHidden ? (card as any).defId as string : undefined;
-  const def = defId ? CLIENT_CARD_DEFS.get(defId) : undefined;
-  const protoId = defId ? `proto_${defId.split("_")[0]}` : "";
-  const bodyColor = PROTOCOL_COLORS.get(protoId) ?? 0x1a3a5c;
-  const accentColor = PROTOCOL_ACCENT_COLORS.get(protoId) ?? 0x4488cc;
-  const faceUpBgFill = shade(bodyColor, 0.7);
-  const titleComp = oppositeHueCss(accentColor);
-  const bgComp = oppositeHueCss(faceUpBgFill);
-
-  const hH = h / 2;
-  const hW = w / 2;
-
-  const borderPad = 4;
-  const borderRadius = 10;
   const borderGfx = scene.add.graphics();
-  borderGfx.lineStyle(4, 0xffffff, 0.9);
-  borderGfx.strokeRoundedRect(cx - hW - borderPad, cy - hH - borderPad, w + borderPad * 2, h + borderPad * 2, borderRadius);
+  borderGfx.lineStyle(Math.max(2, Math.round(3 * scale)), 0xffffff, 0.9);
+  borderGfx.strokeRoundedRect(
+    cx - cardW / 2 - borderPad,
+    cy - cardH / 2 - borderPad,
+    cardW + borderPad * 2,
+    cardH + borderPad * 2,
+    Math.max(6, Math.round(10 * scale)),
+  );
   addToFocusPanel(scene, group, borderGfx);
 
-  const bgFill = isFaceDown ? 0x242424 : faceUpBgFill;
-  const bgStroke = isFaceDown ? 0x666666 : bodyColor;
-  addToFocusPanel(scene, group, scene.add.rectangle(cx, cy, w, h, bgFill).setStrokeStyle(2, bgStroke));
-
-  if (isFaceDown) {
-    for (let dx = -80; dx <= 80; dx += 25) {
-      addToFocusPanel(scene, group, scene.add.rectangle(cx + dx, cy, 6, h - 8, 0x3a3a3a).setAlpha(0.55));
-    }
-    const chip = scene.add.container(cx + hW - 22, cy - hH + 22);
-    chip.add(scene.add.circle(0, 0, 18, 0x3a3a3a));
-    chip.add(scene.add.text(0, 0, "2", {
-      fontSize: "22px", fontFamily: "monospace", color: "#888888", fontStyle: "bold",
-    }).setOrigin(0.5));
-    addToFocusPanel(scene, group, chip);
-    addToFocusPanel(scene, group, scene.add.text(cx, cy + hH - 16, "FACE DOWN", {
-      fontSize: "12px", fontFamily: "monospace", color: "#666666",
-    }).setOrigin(0.5, 1));
-    return;
-  }
-
-  if (!def) return;
-
-  const nameBarH = 38;
-  const nameBarCy = cy - hH + nameBarH / 2;
-  addToFocusPanel(scene, group, scene.add.rectangle(cx, nameBarCy, w, nameBarH, accentColor));
-  addToFocusPanel(scene, group, scene.add.text(cx, nameBarCy, def.name, {
-    fontSize: "20px", fontFamily: "monospace", color: titleComp, fontStyle: "bold",
-    wordWrap: { width: w - 52 },
-    stroke: "#000000", strokeThickness: 3,
-  }).setOrigin(0.5));
-
-  const chip = scene.add.container(cx + hW - 22, cy - hH + 20);
-  chip.add(scene.add.circle(0, 0, 18, shade(faceUpBgFill, 0.6)));
-  chip.add(scene.add.text(0, 0, String(def.value), {
-    fontSize: "22px", fontFamily: "monospace", color: bgComp, fontStyle: "bold",
-    stroke: "#000000", strokeThickness: 3,
-  }).setOrigin(0.5));
-  addToFocusPanel(scene, group, chip);
-
-  const secH = (h - nameBarH) / 3;
-  const secTop = (i: number) => cy - hH + nameBarH + secH * i;
-
-  for (let i = 0; i < 3; i++) {
-    addToFocusPanel(scene, group, scene.add.rectangle(cx, secTop(i), w, 1, 0x1e4a70));
-  }
-
-  const sections = [
-    { tag: "START", text: def.top },
-    { tag: "PLAY", text: def.mid },
-    { tag: "END", text: def.bot },
-  ] as const;
-
-  sections.forEach(({ tag, text }, i) => {
-    const sTop = secTop(i);
-    if (!text) {
-      addToFocusPanel(scene, group, scene.add.text(cx, sTop + secH / 2, "-", {
-        fontSize: "12px", fontFamily: "monospace", color: bgComp,
-        stroke: "#000000", strokeThickness: 2,
-      }).setOrigin(0.5));
-      return;
-    }
-    addToFocusPanel(scene, group, scene.add.text(cx - hW + 7, sTop + 6, tag, {
-      fontSize: "11px", fontFamily: "monospace", color: bgComp,
-      stroke: "#000000", strokeThickness: 2,
-    }).setOrigin(0, 0));
-    addToFocusPanel(scene, group, scene.add.text(cx, sTop + 22, text, {
-      fontSize: "14px", fontFamily: "monospace", color: bgComp,
-      wordWrap: { width: w - 18 }, align: "center",
-      stroke: "#000000", strokeThickness: 2,
-    }).setOrigin(0.5, 0));
-  });
+  const sprite = new CardSprite(scene, cx, cy, card, CLIENT_CARD_DEFS, covered, scale);
+  addToFocusPanel(scene, group, sprite);
 }

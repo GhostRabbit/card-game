@@ -13,10 +13,6 @@ import { v4 as uuidv4 } from "uuid";
 import {
   getCardsForProtocol,
   PROTOCOLS,
-  MAIN_UNIT_1_IDS,
-  MAIN_UNIT_2_IDS,
-  AUX_1_IDS,
-  AUX_2_IDS,
 } from "../data/cards";
 
 /** Pick order for a 3-protocol draft: [0,1,1,0,0,1] = player0 picks 1, then player1 picks 2, then player0 picks 2 */
@@ -41,19 +37,8 @@ export function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function protocolIdsForSet(setId: ProtocolSet): Set<string> {
-  switch (setId) {
-    case ProtocolSet.MainUnit1:
-      return MAIN_UNIT_1_IDS;
-    case ProtocolSet.MainUnit2:
-      return MAIN_UNIT_2_IDS;
-    case ProtocolSet.Aux1:
-      return AUX_1_IDS;
-    case ProtocolSet.Aux2:
-      return AUX_2_IDS;
-    default:
-      return new Set<string>();
-  }
+function protocolMatchesSelectedSets(protocol: ProtocolDef, selectedSets: Set<ProtocolSet>): boolean {
+  return selectedSets.has(protocol.set);
 }
 
 export function normalizeLobbySettings(input?: LobbySettings): LobbySettings {
@@ -74,13 +59,8 @@ export function normalizeLobbySettings(input?: LobbySettings): LobbySettings {
 }
 
 function poolForSettings(settings: LobbySettings): ProtocolDef[] {
-  const selectedIds = new Set<string>();
-  for (const setId of settings.selectedProtocolSets) {
-    for (const id of protocolIdsForSet(setId)) {
-      selectedIds.add(id);
-    }
-  }
-  const base = PROTOCOLS.filter((p) => selectedIds.has(p.id));
+  const selectedSets = new Set(settings.selectedProtocolSets);
+  const base = PROTOCOLS.filter((p) => protocolMatchesSelectedSets(p, selectedSets));
   if (settings.draftVariant === DraftVariant.Limited9) {
     return shuffle(base).slice(0, 9);
   }
@@ -101,13 +81,8 @@ export function createInitialDraftState(lobbySettings?: LobbySettings): DraftSta
 
 export function createRandomThreeDraftState(lobbySettings?: LobbySettings): DraftState | { error: string } {
   const normalized = normalizeLobbySettings(lobbySettings);
-  const pool = PROTOCOLS.filter((p) => {
-    const selected = new Set(normalized.selectedProtocolSets);
-    return (selected.has(ProtocolSet.MainUnit1) && MAIN_UNIT_1_IDS.has(p.id)) ||
-      (selected.has(ProtocolSet.MainUnit2) && MAIN_UNIT_2_IDS.has(p.id)) ||
-      (selected.has(ProtocolSet.Aux1) && AUX_1_IDS.has(p.id)) ||
-      (selected.has(ProtocolSet.Aux2) && AUX_2_IDS.has(p.id));
-  });
+  const selectedSets = new Set(normalized.selectedProtocolSets);
+  const pool = PROTOCOLS.filter((p) => protocolMatchesSelectedSets(p, selectedSets));
 
   if (pool.length < 6) {
     return { error: "Selected protocol sets do not contain enough protocols for Random 3." };

@@ -61,12 +61,25 @@ export function buildPlayerView(
     opponentRevealedHandCard: state.revealHandCardFor?.viewerIndex === playerIndex
       ? (opponent.hand.find((c) => c.instanceId === state.revealHandCardFor!.cardId) ?? null)
       : null,
+    ownRevealedTopDeckCard: state.revealTopDeckFor?.playerIndex === playerIndex
+      ? state.revealTopDeckFor.card
+      : null,
     pendingBonusPlay: state.pendingBonusPlay && state.activePlayerIndex === playerIndex
       ? state.pendingBonusPlay
       : null,
+    lastTargetedInstanceId: state.lastTargetedInstanceId,
     pendingControlReorder: state.pendingControlReorder === playerIndex,
     lineValues: [lineValue(state, playerIndex, 0), lineValue(state, playerIndex, 1), lineValue(state, playerIndex, 2)],
     opponentLineValues: [lineValue(state, oi, 0), lineValue(state, oi, 1), lineValue(state, oi, 2)],
+      effectStack: state.effectQueue.map((e) => ({
+        id: e.id,
+        cardDefId: e.cardDefId,
+        cardName: e.cardName,
+        type: e.type,
+        description: e.description,
+        ownerIndex: e.ownerIndex,
+        trigger: e.trigger,
+      })),
       compileDeniedThisTurn: state.compileDeniedThisTurn && state.activePlayerIndex === playerIndex,
   };
 

@@ -165,7 +165,7 @@ test.describe('Shift effect - two-stage board then line', () => {
 // ── Hand-pick effects ─────────────────────────────────────────────────────────
 
 test.describe('Hand-pick effects', () => {
-  test('exchange_hand shows hand-pick hint and no skip', async ({ gamePage }) => {
+  test('exchange_hand first shows confirm to receive the opponent card', async ({ gamePage }) => {
     await gamePage.gotoForEffect('exchange_hand');
 
     expect(await gamePage.isEffectResolutionActive()).toBe(true);
@@ -174,7 +174,19 @@ test.describe('Hand-pick effects', () => {
     expect(description).toContain('Love');
 
     const hint = await gamePage.getEffectHint();
-    expect(hint.toLowerCase()).toContain('hand');
+    expect(hint.toLowerCase()).toContain('random card');
+
+    expect(await gamePage.hasSkipButton()).toBe(false);
+    expect(await gamePage.hasConfirmButton()).toBe(true);
+  });
+
+  test('exchange_hand give step shows hand-pick hint and no skip', async ({ gamePage }) => {
+    await gamePage.gotoForEffect('exchange_hand_give');
+
+    expect(await gamePage.isEffectResolutionActive()).toBe(true);
+
+    const hint = await gamePage.getEffectHint();
+    expect(hint.toLowerCase()).toContain('give');
 
     expect(await gamePage.hasSkipButton()).toBe(false);
     expect(await gamePage.hasConfirmButton()).toBe(false);

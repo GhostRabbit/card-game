@@ -78,7 +78,7 @@ All types are handled in `executeEffect()` in CardEffects.ts. Effects that requi
 |---|---|---|---|---|
 | `flip` | immediate | apy_1/3/4, drk_1/2, fir_0, grv_2, lif_1/2, lgt_2, lov_4, mtl_0, plg_3, spr_2, wtr_0 | Toggle a card's face; variant in `payload.targets`; flipping face-up fires `enqueueEffectsOnFlipFaceUp()` | `[ ]` |
 | `shift` | immediate / end | drk_0/4, grv_1/2/4, lgt_3, psy_3, spd_3/4 | Move a card to a different line; `targetLineIndex` required | `[ ]` |
-| `delete` | immediate | dth_0/2/3/4, hat_0, mtl_3 | Trash card(s) from any line; `payload.targets` selects variant (`each_other_line`, `line_values_1_2`, `line_8plus_cards`, `any_card`, `any_facedown`, `value_0_or_1`) | `[ ]` |
+| `delete` | immediate | dth_0/2/3/4, hat_0, mtl_3 | Trash card(s) from any line; `payload.targets` selects variant (`line_values_1_2`, `line_8plus_cards`, `any_card`, `any_facedown`, `value_0_or_1`) | `[ ]` |
 | `delete_highest_both` | immediate | hat_2 | Each player trashes their own highest-value card | `[ ]` |
 | `opponent_discard_reveal` | immediate | psy_0 | Opponent discards N random cards, then reveals their hand | `[ ]` |
 | `play_card` | immediate | spd_0 | Grants an extra card play within the same turn | `[ ]` |
@@ -115,7 +115,7 @@ All types are handled in `executeEffect()` in CardEffects.ts. Effects that requi
 | drk_3 | immediate: play_facedown | done |
 | drk_4 | immediate: shift any face-down | done |
 | drk_5 | immediate: discard 1 | done |
-| dth_0 | immediate: delete each other line | done |
+| dth_0 | immediate: delete any card | done |
 | dth_1 | start: draw_then_delete_self | done |
 | dth_2 | immediate: delete line values 1-2 | done |
 | dth_3 | immediate: delete any face-down | done |
@@ -172,7 +172,7 @@ All types are handled in `executeEffect()` in CardEffects.ts. Effects that requi
 | psy_0 | immediate: draw 2 + opponent_discard_reveal 2 | done |
 | psy_1 | passive: deny_faceup; start: flip_self | done active / passive |
 | psy_2 | immediate: opponent_discard 2 + rearrange_protocols opp | done |
-| psy_3 | immediate: opponent_discard 1 + shift opp any | done |
+| psy_3 | immediate: opponent_discard 1 | done |
 | psy_4 | end: return_opp_flip_self | done |
 | psy_5 | immediate: discard 1 | done |
 | spd_0 | immediate: play_card | done |

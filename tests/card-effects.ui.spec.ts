@@ -12,6 +12,16 @@ import { test, expect } from './helpers/fixtures';
 // ── Auto-execute effects ──────────────────────────────────────────────────────
 
 test.describe('Auto-execute effects', () => {
+  test('cache discard effect highlights CACHE instead of ACTION', async ({ gamePage }) => {
+    await gamePage.gotoForEffect('cache_discard');
+
+    expect(await gamePage.isEffectResolutionActive()).toBe(true);
+    expect(await gamePage.getActivePhase()).toBe('CACHE');
+
+    const description = (await gamePage.getStatusText('effect-description')) ?? '';
+    expect(description).toContain('Cache');
+  });
+
   test('draw effect shows CONFIRM button and description', async ({ gamePage }) => {
     await gamePage.gotoForEffect('draw');
 
@@ -143,6 +153,24 @@ test.describe('Board-pick effects', () => {
     const hint = (await gamePage.getStatusText('effect-hint')) ?? '';
     expect(hint.length).toBeGreaterThan(0);
   });
+
+  test('plg_4 delete step shows opponent face-down targeting hint', async ({ gamePage }) => {
+    await gamePage.gotoForEffect('plg4_delete_opponent_facedown');
+
+    expect(await gamePage.isEffectResolutionActive()).toBe(true);
+
+    const description = (await gamePage.getStatusText('effect-description')) ?? '';
+    expect(description).toContain('Plague');
+    expect(description.toLowerCase()).toContain('face-down');
+
+    const hint = (await gamePage.getStatusText('effect-hint')) ?? '';
+    expect(hint.toLowerCase()).toContain('opponent');
+    expect(hint.toLowerCase()).toContain('face-down');
+
+    expect(await gamePage.hasSkipButton()).toBe(false);
+    expect(await gamePage.hasConfirmButton()).toBe(false);
+  });
+
 });
 
 // ── Shift (board-pick + line-pick) ───────────────────────────────────────────
@@ -167,7 +195,7 @@ test.describe('Shift effect - two-stage board then line', () => {
 // ── Hand-pick effects ─────────────────────────────────────────────────────────
 
 test.describe('Hand-pick effects', () => {
-  test('exchange_hand shows hand-pick hint and no skip', async ({ gamePage }) => {
+  test('exchange_hand first shows confirm to receive the opponent card', async ({ gamePage }) => {
     await gamePage.gotoForEffect('exchange_hand');
 
     expect(await gamePage.isEffectResolutionActive()).toBe(true);
@@ -176,7 +204,19 @@ test.describe('Hand-pick effects', () => {
     expect(description).toContain('Love');
 
     const hint = (await gamePage.getStatusText('effect-hint')) ?? '';
-    expect(hint.toLowerCase()).toContain('hand');
+    expect(hint.toLowerCase()).toContain('random card');
+
+    expect(await gamePage.hasSkipButton()).toBe(false);
+    expect(await gamePage.hasConfirmButton()).toBe(true);
+  });
+
+  test('exchange_hand give step shows hand-pick hint and no skip', async ({ gamePage }) => {
+    await gamePage.gotoForEffect('exchange_hand_give');
+
+    expect(await gamePage.isEffectResolutionActive()).toBe(true);
+
+    const hint = (await gamePage.getStatusText('effect-hint')) ?? '';
+    expect(hint.toLowerCase()).toContain('give');
 
     expect(await gamePage.hasSkipButton()).toBe(false);
     expect(await gamePage.hasConfirmButton()).toBe(false);
@@ -298,5 +338,31 @@ test.describe('rearrange_protocols (auto-execute with protocol reorder)', () => 
     expect(await gamePage.hasConfirmButton()).toBe(false);
     const hint = (await gamePage.getStatusText('effect-hint')) ?? '';
     expect(hint.toLowerCase()).toContain('click protocols');
+  });
+});
+
+test.describe('Plague 4 optional self flip', () => {
+  test('plg_4 flip step shows SKIP and self-target hint', async ({ gamePage }) => {
+    await gamePage.gotoForEffect('plg4_flip_self_optional');
+
+    expect(await gamePage.isEffectResolutionActive()).toBe(true);
+
+    const description = (await gamePage.getStatusText('effect-description')) ?? '';
+    expect(description).toContain('Plague');
+    expect(description.toLowerCase()).toContain('flip this card');
+
+    const hint = (await gamePage.getStatusText('effect-hint')) ?? '';
+    expect(hint.toLowerCase()).toContain('this card');
+
+    expect(await gamePage.hasSkipButton()).toBe(true);
+    expect(await gamePage.hasConfirmButton()).toBe(false);
+  });
+
+  test('plg_4 flip step can be skipped', async ({ gamePage }) => {
+    await gamePage.gotoForEffect('plg4_flip_self_optional');
+
+    expect(await gamePage.hasSkipButton()).toBe(true);
+    await gamePage.clickSkipEffect();
+    expect(await gamePage.isEffectResolutionActive()).toBe(true);
   });
 });

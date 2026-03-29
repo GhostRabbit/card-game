@@ -1,35 +1,41 @@
-import { CommandCardDef, ProtocolDef } from "@compile/shared";
+import { CommandCardDef, ProtocolDef, ProtocolSet } from "@compile/shared";
+import {
+  GENERATED_MAIN_UNIT_2_COMMAND_CARDS,
+  GENERATED_MAIN_UNIT_2_PROTOCOLS,
+} from "./mainUnit2Generated";
 
 export const PROTOCOLS: ProtocolDef[] = [
-  { id: "proto_apy", name: "Apathy",  description: "Stillness as strategy. Rewards face-down cards and disrupts opponent face-up cards." },
-  { id: "proto_drk", name: "Darkness", description: "Hidden power. Boosts face-down cards and manipulates covered positions." },
-  { id: "proto_dth", name: "Death",   description: "Brutal deletion. Destroys low-value cards and accelerates through the deck." },
-  { id: "proto_fir", name: "Fire",    description: "Volatile cycling. Discard to delete or return, generating surges of cards." },
-  { id: "proto_grv", name: "Gravity", description: "Deck manipulation. Forces cards from decks and pulls cards into specific lines." },
-  { id: "proto_hat", name: "Hate",    description: "Symmetrical destruction. Deletes cards from both sides at great cost." },
-  { id: "proto_lif", name: "Life",    description: "Deck seeding and positional play. Thrives on covering and uncovering cards." },
-  { id: "proto_lgt", name: "Light",   description: "Information and draw. Reveals hidden cards and refills the hand." },
-  { id: "proto_lov", name: "Love",    description: "Exchange and cooperation. Shares cards to gain advantage." },
-  { id: "proto_mtl", name: "Metal",   description: "Lockdown and denial. Restricts the opponent's actions and reduces their value." },
-  { id: "proto_plg", name: "Plague",  description: "Forced discards. Depletes the opponent's hand relentlessly." },
-  { id: "proto_psy", name: "Psychic", description: "Mind control. Forces discards, rearranges protocols, and denies plays." },
-  { id: "proto_spd", name: "Speed",   description: "Extra plays and repositioning. Shifts cards freely across lines." },
-  { id: "proto_spr", name: "Spirit",  description: "Flexible and adaptive. Plays anywhere, draws freely, shifts at will." },
-  { id: "proto_wtr", name: "Water",   description: "Fluid control. Returns cards, rearranges protocols, and flips at will." },
+  { id: "proto_apy", name: "Apathy",  description: "Stillness as strategy. Rewards face-down cards and disrupts opponent face-up cards.", set: ProtocolSet.Aux1 },
+  { id: "proto_drk", name: "Darkness", description: "Hidden power. Boosts face-down cards and manipulates covered positions.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_dth", name: "Death",   description: "Brutal deletion. Destroys low-value cards and accelerates through the deck.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_fir", name: "Fire",    description: "Volatile cycling. Discard to delete or return, generating surges of cards.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_grv", name: "Gravity", description: "Deck manipulation. Forces cards from decks and pulls cards into specific lines.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_hat", name: "Hate",    description: "Symmetrical destruction. Deletes cards from both sides at great cost.", set: ProtocolSet.Aux1 },
+  { id: "proto_lif", name: "Life",    description: "Deck seeding and positional play. Thrives on covering and uncovering cards.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_lgt", name: "Light",   description: "Information and draw. Reveals hidden cards and refills the hand.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_lov", name: "Love",    description: "Exchange and cooperation. Shares cards to gain advantage.", set: ProtocolSet.Aux1 },
+  { id: "proto_mtl", name: "Metal",   description: "Lockdown and denial. Restricts the opponent's actions and reduces their value.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_plg", name: "Plague",  description: "Forced discards. Depletes the opponent's hand relentlessly.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_psy", name: "Psychic", description: "Mind control. Forces discards, rearranges protocols, and denies plays.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_spd", name: "Speed",   description: "Extra plays and repositioning. Shifts cards freely across lines.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_spr", name: "Spirit",  description: "Flexible and adaptive. Plays anywhere, draws freely, shifts at will.", set: ProtocolSet.MainUnit1 },
+  { id: "proto_wtr", name: "Water",   description: "Fluid control. Returns cards, rearranges protocols, and flips at will.", set: ProtocolSet.MainUnit1 },
+  ...GENERATED_MAIN_UNIT_2_PROTOCOLS,
 ];
 
 /** IDs belonging to each release unit (used for game-mode filtering) */
 export const MAIN_UNIT_1_IDS = new Set<string>([
-  "proto_spd", "proto_drk", "proto_dth", "proto_fir",
+  "proto_spd", "proto_drk", "proto_dth", "proto_fir", "proto_grv", "proto_lif", "proto_lgt",
+  "proto_mtl", "proto_plg", "proto_psy", "proto_spr", "proto_wtr",
 ]);
 export const MAIN_UNIT_2_IDS = new Set<string>([
-  "proto_grv", "proto_hat", "proto_lif", "proto_lgt",
+  ...GENERATED_MAIN_UNIT_2_PROTOCOLS.filter((p) => p.set === ProtocolSet.MainUnit2).map((p) => p.id),
 ]);
 export const AUX_1_IDS = new Set<string>([
-  "proto_lov", "proto_mtl", "proto_plg", "proto_psy",
+  "proto_lov", "proto_hat", "proto_apy",
 ]);
 export const AUX_2_IDS = new Set<string>([
-  "proto_spr", "proto_wtr", "proto_apy",
+  ...GENERATED_MAIN_UNIT_2_PROTOCOLS.filter((p) => p.set === ProtocolSet.Aux2).map((p) => p.id),
 ]);
 
 export const COMMAND_CARDS: CommandCardDef[] = [
@@ -136,7 +142,7 @@ export const COMMAND_CARDS: CommandCardDef[] = [
   { id: "lif_0", name: "Life", value: 0, protocolId: "proto_lif",
     effects: [
       { trigger: "immediate", type: "deck_to_each_line", description: "Play the top card of your deck face-down in each line where you have a card.", payload: {} },
-      { trigger: "passive", type: "on_covered_delete_self", description: "When covered: first, delete this card.", payload: {} },
+      { trigger: "end", type: "delete_self_if_covered", description: "If this is covered, delete this card.", payload: {} },
     ] },
   { id: "lif_1", name: "Life", value: 1, protocolId: "proto_lif",
     effects: [{ trigger: "immediate", type: "flip", description: "Flip 1 card. Flip 1 card.", payload: { count: 2, targets: "any_uncovered" } }] },
@@ -162,7 +168,7 @@ export const COMMAND_CARDS: CommandCardDef[] = [
       { trigger: "immediate", type: "reveal_shift_or_flip", description: "Reveal 1 face-down card. You may shift or flip that card.", payload: {} },
     ] },
   { id: "lgt_3", name: "Light", value: 3, protocolId: "proto_lgt",
-    effects: [{ trigger: "immediate", type: "shift", description: "Shift all face-down cards in this line to another line.", payload: { targets: "own_facedown_in_line" } }] },
+    effects: [{ trigger: "immediate", type: "shift", description: "Shift all face-down cards in this line (both players) to another line.", payload: { targets: "own_facedown_in_line" } }] },
   { id: "lgt_4", name: "Light", value: 4, protocolId: "proto_lgt",
     effects: [{ trigger: "immediate", type: "reveal_hand", description: "Your opponent reveals their hand.", payload: {} }] },
   { id: "lgt_5", name: "Light", value: 5, protocolId: "proto_lgt",
@@ -227,7 +233,10 @@ export const COMMAND_CARDS: CommandCardDef[] = [
   { id: "plg_3", name: "Plague", value: 3, protocolId: "proto_plg",
     effects: [{ trigger: "immediate", type: "flip", description: "Flip each other face-up card.", payload: { targets: "all_other_faceup" } }] },
   { id: "plg_4", name: "Plague", value: 4, protocolId: "proto_plg",
-    effects: [{ trigger: "end", type: "opp_delete_facedown_flip_self", description: "Your opponent deletes 1 of their face-down cards. You may flip this card.", payload: {} }] },
+    effects: [
+      { trigger: "end", type: "delete", description: "Your opponent deletes 1 of their face-down cards.", payload: { targets: "opponent_facedown" } },
+      { trigger: "end", type: "flip", description: "You may flip this card.", payload: { targets: "self", optional: true } },
+    ] },
   { id: "plg_5", name: "Plague", value: 5, protocolId: "proto_plg",
     effects: [{ trigger: "immediate", type: "discard", description: "You discard 1 card.", payload: { amount: 1, who: "self" } }] },
   // ── PSYCHIC (proto_psy) ───────────────────────────────────────────────────────────
@@ -282,8 +291,9 @@ export const COMMAND_CARDS: CommandCardDef[] = [
     ] },
   { id: "spr_1", name: "Spirit", value: 1, protocolId: "proto_spr",
     effects: [
-      { trigger: "immediate", type: "play_any_line", description: "You can play cards in any line. Draw 2 cards.", payload: { draw: 2 } },
-      { trigger: "start", type: "discard_or_flip_self", description: "Either discard 1 card or flip this card.", payload: {} },
+      { trigger: "start", type: "play_any_line", description: "You can play cards in any line.", payload: { draw: 0 } },
+      { trigger: "start", type: "draw", description: "Draw 2 cards.", payload: { amount: 2 } },
+      { trigger: "end", type: "discard_or_flip_self", description: "Either discard 1 card or flip this card.", payload: {} },
     ] },
   { id: "spr_2", name: "Spirit", value: 2, protocolId: "proto_spr",
     effects: [{ trigger: "immediate", type: "flip", description: "You may flip 1 card.", payload: { targets: "any_card", optional: true } }] },
@@ -312,6 +322,7 @@ export const COMMAND_CARDS: CommandCardDef[] = [
     effects: [{ trigger: "immediate", type: "return", description: "Return 1 of your cards.", payload: { targets: "own_any" } }] },
   { id: "wtr_5", name: "Water", value: 5, protocolId: "proto_wtr",
     effects: [{ trigger: "immediate", type: "discard", description: "You discard 1 card.", payload: { amount: 1, who: "self" } }] },
+  ...GENERATED_MAIN_UNIT_2_COMMAND_CARDS,
 ];
 
 export const PROTOCOL_MAP = new Map(PROTOCOLS.map((p) => [p.id, p]));

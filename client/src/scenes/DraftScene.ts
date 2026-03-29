@@ -55,6 +55,38 @@ export class DraftScene extends Phaser.Scene {
     const socket = getSocket();
     const { width, height } = this.scale;
 
+    this.add.rectangle(width / 2, height / 2, width, height, 0x10263a);
+    this.add.circle(width * 0.14, height * 0.18, 240, 0x65e6ff, 0.14);
+    this.add.circle(width * 0.86, height * 0.22, 220, 0x7f7dff, 0.12);
+    this.add.circle(width * 0.5, height * 0.72, 300, 0xffd166, 0.05);
+    this.add.rectangle(width / 2, height * 0.14, width, 170, 0x18324d, 0.28);
+    this.add.rectangle(width / 2, height * 0.88, width, 210, 0x0d1625, 0.22);
+
+    const bgLines = this.add.graphics();
+    bgLines.lineStyle(1, 0x7fd8ff, 0.1);
+    for (let y = 44; y < height; y += 64) {
+      bgLines.lineBetween(30, y, width - 30, y);
+    }
+    for (let x = 54; x < width; x += 92) {
+      bgLines.lineBetween(x, 28, x, height - 28);
+    }
+    bgLines.lineStyle(2, 0x8cf5de, 0.16);
+    bgLines.lineBetween(width * 0.12, height * 0.18, width * 0.36, height * 0.34);
+    bgLines.lineBetween(width * 0.88, height * 0.22, width * 0.64, height * 0.36);
+    bgLines.lineBetween(width * 0.36, height * 0.34, width * 0.5, height * 0.5);
+    bgLines.lineBetween(width * 0.64, height * 0.36, width * 0.5, height * 0.5);
+    bgLines.lineBetween(width * 0.5, height * 0.5, width * 0.5, height * 0.78);
+    [
+      [width * 0.12, height * 0.18, 9, 0x65e6ff],
+      [width * 0.36, height * 0.34, 7, 0x91ffd8],
+      [width * 0.5, height * 0.5, 11, 0xffd166],
+      [width * 0.64, height * 0.36, 7, 0xc2a2ff],
+      [width * 0.88, height * 0.22, 9, 0x7f7dff],
+    ].forEach(([x, y, radius, color]) => {
+      bgLines.fillStyle(color as number, 0.22);
+      bgLines.fillCircle(x as number, y as number, radius as number);
+    });
+
     // ── Layout: derive every Y position top-down so nothing can overlap ──
     const L = {
       titleY:     28,
@@ -74,7 +106,7 @@ export class DraftScene extends Phaser.Scene {
 
     // ── Static header ──────────────────────────────────────────────────────
     this.add.text(width / 2, L.titleY, "DRAFT PROTOCOLS", {
-      fontSize: "30px", fontFamily: "monospace", color: "#00ffcc", fontStyle: "bold",
+      fontSize: "30px", fontFamily: "monospace", color: "#dffcff", fontStyle: "bold",
     }).setOrigin(0.5);
 
     const variantLabel: Record<DraftVariant, string> = {
@@ -93,11 +125,11 @@ export class DraftScene extends Phaser.Scene {
       .join(", ");
     this.add.text(width / 2, L.titleY + 26,
       `Variant: ${variantLabel[this.draftState.lobbySettings.draftVariant] ?? this.draftState.lobbySettings.draftVariant} | Sets: ${setText}`, {
-        fontSize: "12px", fontFamily: "monospace", color: "#556677",
+        fontSize: "12px", fontFamily: "monospace", color: "#9fc4e6",
       }).setOrigin(0.5);
 
     this.add.text(width / 2, L.pickLabelY, "Pick order:", {
-      fontSize: "13px", fontFamily: "monospace", color: "#556677",
+      fontSize: "13px", fontFamily: "monospace", color: "#b5d6ef",
     }).setOrigin(0.5);
 
     const dotSize = 28, dotGap = 6;
@@ -112,17 +144,17 @@ export class DraftScene extends Phaser.Scene {
       const dx = dotStartX + i * (dotSize + dotGap);
       const isYou = pickOrderLabels[i] === "YOU";
       const dot = this.add.rectangle(dx, L.dotsY, dotSize, dotSize,
-        isYou ? 0x003322 : 0x110022)
-        .setStrokeStyle(1, isYou ? 0x00ffcc : 0x554477);
+        isYou ? 0x164f4b : 0x35214f)
+        .setStrokeStyle(1.5, isYou ? 0x97fff0 : 0xd2a8ff);
       this.add.text(dx, L.dotsY, pickOrderLabels[i], {
         fontSize: "9px", fontFamily: "monospace",
-        color: isYou ? "#00ffcc" : "#8855aa",
+        color: isYou ? "#e7fffb" : "#f1dcff",
       }).setOrigin(0.5);
       this.pickOrderDots.push(dot);
     }
 
     this.add.text(width / 2, L.hintY, "You pick 1 • Opponent picks 2 • You pick 2", {
-      fontSize: "12px", fontFamily: "monospace", color: "#445566",
+      fontSize: "12px", fontFamily: "monospace", color: "#8fb9d5",
     }).setOrigin(0.5);
 
     // ── Dynamic area (rebuilt on each update) ─────────────────────────────
@@ -150,16 +182,16 @@ export class DraftScene extends Phaser.Scene {
     // Highlight current dot
     for (let i = 0; i < this.pickOrderDots.length; i++) {
       if (i < picksDone) {
-        this.pickOrderDots[i].setFillStyle(0x223322).setStrokeStyle(2, 0x336644);
+        this.pickOrderDots[i].setFillStyle(0x38635a).setStrokeStyle(2, 0x8be1c9);
       } else if (i === picksDone) {
-        this.pickOrderDots[i].setFillStyle(isMyTurn ? 0x004433 : 0x221133)
-          .setStrokeStyle(2, isMyTurn ? 0x00ffcc : 0xaa66ff);
+        this.pickOrderDots[i].setFillStyle(isMyTurn ? 0x1a645f : 0x4d2f72)
+          .setStrokeStyle(2, isMyTurn ? 0x97fff0 : 0xdfb8ff);
       }
     }
 
     // Turn banner — positioned via layout object
-    const bannerColor  = state.done ? 0x002211 : (isMyTurn ? 0x002211 : 0x110022);
-    const bannerBorder = state.done ? 0x00ffcc : (isMyTurn ? 0x00ffcc : 0xaa44ff);
+    const bannerColor  = state.done ? 0x123c36 : (isMyTurn ? 0x154f4b : 0x40275c);
+    const bannerBorder = state.done ? 0x99ffeb : (isMyTurn ? 0x97fff0 : 0xe2b8ff);
     const bannerBg = this.add.rectangle(width / 2, L.bannerY, 520, L.bannerH, bannerColor)
       .setStrokeStyle(2, bannerBorder);
     this.dynamicGroup.add(bannerBg, true);
@@ -171,7 +203,7 @@ export class DraftScene extends Phaser.Scene {
     this.dynamicGroup.add(
       this.add.text(width / 2, L.bannerY, bannerMsg, {
         fontSize: "16px", fontFamily: "monospace",
-        color: state.done ? "#00ffcc" : (isMyTurn ? "#00ffcc" : "#aa66ff"),
+        color: state.done ? "#effff8" : (isMyTurn ? "#effff8" : "#f8efff"),
         fontStyle: isMyTurn ? "bold" : "normal",
       }).setOrigin(0.5), true
     );
@@ -330,18 +362,18 @@ export class DraftScene extends Phaser.Scene {
     const summaryY = L.summaryY;
     this.dynamicGroup.add(
       this.add.rectangle(width / 2, summaryY, width - 40, L.summaryH, 0x0a1520)
-        .setStrokeStyle(1, 0x1a3355), true
+        .setStrokeStyle(1.5, 0x44739a), true
     );
     this.dynamicGroup.add(
       this.add.text(width / 2, summaryY - 10,
         `Your picks (${myPicks.length}/3): ${myPicks.length ? myPicks.join("  •  ") : "none yet"}`, {
-          fontSize: "14px", fontFamily: "monospace", color: "#00ffcc",
+          fontSize: "14px", fontFamily: "monospace", color: "#defff7",
         }).setOrigin(0.5), true
     );
     this.dynamicGroup.add(
       this.add.text(width / 2, summaryY + 12,
         `Opponent picks: ${oppPickCount}/3`, {
-          fontSize: "12px", fontFamily: "monospace", color: "#556677",
+          fontSize: "12px", fontFamily: "monospace", color: "#a9c5de",
         }).setOrigin(0.5), true
     );
   }

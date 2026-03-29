@@ -70,6 +70,7 @@ export interface ProtocolDef {
   id: string;
   name: string;
   description: string;
+  set: ProtocolSet;
 }
 
 // ─── In-Play Card Instance ────────────────────────────────────────────────────
@@ -130,8 +131,12 @@ export interface PlayerView extends Omit<PlayerState, "hand"> {
   opponentHandRevealed: CardInstance[] | null;
   /** Non-null when the opponent has revealed a specific hand card to this player */
   opponentRevealedHandCard: CardInstance | null;
+  /** Non-null when this player's own top deck card is temporarily revealed (awaiting their read-confirm) */
+  ownRevealedTopDeckCard: CardInstance | null;
   /** Non-null when this player has a bonus play available (from play_card / play_any_line) */
   pendingBonusPlay: { anyLine: boolean } | null;
+  /** Last explicitly targeted board card instance, when relevant to a follow-up effect. */
+  lastTargetedInstanceId: string | null;
   /** True when this player must resolve the control-reorder bonus (may skip) */
   pendingControlReorder: boolean;
   /** Server-computed line values (own lines, after passive modifiers) */
@@ -140,6 +145,8 @@ export interface PlayerView extends Omit<PlayerState, "hand"> {
   opponentLineValues: [number, number, number];
     /** True during the turn when this player's compile was denied by an opponent effect */
     compileDeniedThisTurn: boolean;
+  /** Snapshot of the current queued effects (top-first) for HUD display. */
+  effectStack?: Array<Pick<PendingEffect, "id" | "cardDefId" | "cardName" | "type" | "description" | "ownerIndex" | "trigger">>;
 }
 
 /** A single effect waiting for a player to confirm before it executes. */
