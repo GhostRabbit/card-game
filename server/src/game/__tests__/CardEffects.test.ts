@@ -262,13 +262,36 @@ describe("enqueueEffectsFromCard", () => {
     expect(state.effectQueue[0].trigger).toBe("start");
   });
 
-  it("psy_3 queues only opponent_discard (no extra shift effect)", () => {
+  it("psy_3 queues a single opponent-owned discard prompt", () => {
     const state = makeState();
+    state.players[1].hand.push(card("tmp_opp", CardFace.FaceUp));
 
     enqueueEffectsFromCard(state, 0, "psy_3", "immediate");
 
     expect(state.effectQueue).toHaveLength(1);
-    expect(state.effectQueue[0].type).toBe("opponent_discard");
+    expect(state.effectQueue[0].type).toBe("discard");
+    expect(state.effectQueue[0].ownerIndex).toBe(1);
+  });
+
+  it("psy_0 normalizes opponent_discard_reveal into opponent-owned discard prompts", () => {
+    const state = makeState();
+    // psy_0 immediate: draw 2 + opponent_discard_reveal amount 2
+    // Opponent currently has only 1 card, so reveal-discard should clamp to 1 prompt.
+    state.players[1].hand.push(card("opp_only", CardFace.FaceUp));
+
+    enqueueEffectsFromCard(state, 0, "psy_0", "immediate", "psy-src");
+
+    expect(state.effectQueue).toHaveLength(2);
+    expect(state.effectQueue[0].type).toBe("draw");
+    expect(state.effectQueue[0].ownerIndex).toBe(0);
+    expect(state.effectQueue[0].sourceInstanceId).toBe("psy-src");
+
+    expect(state.effectQueue[1].type).toBe("discard");
+    expect(state.effectQueue[1].ownerIndex).toBe(1);
+    expect(state.effectQueue[1].payload.oppDiscardDrawFor).toBe(0);
+    expect(state.effectQueue[1].payload.revealOpponentHandFor).toBe(0);
+    expect(state.effectQueue[1].sourceInstanceId).toBe("psy-src");
+    expect(state.effectQueue.some((e) => e.type === "opponent_discard_reveal")).toBe(false);
   });
 
   it("is a no-op for an unknown card defId", () => {
@@ -795,6 +818,27 @@ describe("enqueueEffectsOnFlipFaceUp", () => {
     }
   });
 
+  it("psy_0 uncovered flip queues draw plus opponent-owned reveal-discard prompts", () => {
+    const state = makeState();
+    const flipped: CardInstance = { instanceId: "psy-flip", defId: "psy_0", face: CardFace.FaceUp };
+    state.players[1].hand.push(card("opp1", CardFace.FaceUp), card("opp2", CardFace.FaceUp));
+
+    enqueueEffectsOnFlipFaceUp(state, 0, flipped);
+
+    // draw + 2 discard prompts (amount 2, opponent hand has 2)
+    expect(state.effectQueue).toHaveLength(3);
+    expect(state.effectQueue[0].type).toBe("draw");
+    const discards = state.effectQueue.filter((e) => e.type === "discard");
+    expect(discards).toHaveLength(2);
+    for (const d of discards) {
+      expect(d.ownerIndex).toBe(1);
+      expect(d.payload.oppDiscardDrawFor).toBe(0);
+      expect(d.payload.revealOpponentHandFor).toBe(0);
+      expect(d.sourceInstanceId).toBe("psy-flip");
+    }
+    expect(state.effectQueue.some((e) => e.type === "opponent_discard_reveal")).toBe(false);
+  });
+
   it("assigns unique ids to all queued effects", () => {
     const state = makeState();
     const flipped: CardInstance = { instanceId: "c1", defId: "drk_0", face: CardFace.FaceUp };
@@ -863,6 +907,25 @@ describe("enqueueEffectsOnUncover", () => {
 
     expect(state.effectQueue).toHaveLength(1);
     expect(state.effectQueue[0].type).toBe("reveal_shift_or_flip");
+  });
+
+  it("psy_0 uncover queues only reveal-discard prompts (not top draw)", () => {
+    const state = makeState();
+    const uncovered: CardInstance = { instanceId: "psy-uncover", defId: "psy_0", face: CardFace.FaceUp };
+    state.players[1].hand.push(card("opp1", CardFace.FaceUp), card("opp2", CardFace.FaceUp));
+
+    enqueueEffectsOnUncover(state, 0, uncovered);
+
+    // On uncover, index 0 immediate is skipped; only opponent_discard_reveal remains.
+    expect(state.effectQueue).toHaveLength(2);
+    expect(state.effectQueue.some((e) => e.type === "draw")).toBe(false);
+    for (const queued of state.effectQueue) {
+      expect(queued.type).toBe("discard");
+      expect(queued.ownerIndex).toBe(1);
+      expect(queued.payload.oppDiscardDrawFor).toBe(0);
+      expect(queued.payload.revealOpponentHandFor).toBe(0);
+      expect(queued.sourceInstanceId).toBe("psy-uncover");
+    }
   });
 
   it("is a no-op for an unknown card defId", () => {
@@ -957,7 +1020,7 @@ describe("executeEffect — deck_to_other_lines (wtr_1)", () => {
 // ─── executeEffect: deck_to_each_line ────────────────────────────────────────
 
 describe("executeEffect — deck_to_each_line (lif_0)", () => {
-  it("plays deck card face-down in every line that has at least one card", () => {
+  it("queues staged line picks and processes occupied lines in chosen order", () => {
     const state = makeState();
     state.players[0].lines[0].cards.push(card("c0"));
     state.players[0].lines[2].cards.push(card("c2")); // line 1 is empty
@@ -966,11 +1029,32 @@ describe("executeEffect — deck_to_each_line (lif_0)", () => {
 
     executeEffect(state, effect("deck_to_each_line", 0));
 
-    expect(state.players[0].lines[0].cards).toHaveLength(2);
-    expect(state.players[0].lines[0].cards[1].face).toBe(CardFace.FaceDown);
-    expect(state.players[0].lines[1].cards).toHaveLength(0); // still empty
+    expect(state.effectQueue).toHaveLength(1);
+    expect(state.players[0].lines[0].cards).toHaveLength(1);
+    expect(state.players[0].lines[2].cards).toHaveLength(1);
+
+    const firstStep = state.effectQueue.shift();
+    expect(firstStep).toBeTruthy();
+    executeEffect(state, {
+      ...firstStep!,
+      payload: { ...firstStep!.payload, targetLineIndex: 2 },
+    });
+
     expect(state.players[0].lines[2].cards).toHaveLength(2);
     expect(state.players[0].lines[2].cards[1].face).toBe(CardFace.FaceDown);
+    expect(state.effectQueue).toHaveLength(1);
+
+    const secondStep = state.effectQueue.shift();
+    expect(secondStep).toBeTruthy();
+    executeEffect(state, {
+      ...secondStep!,
+      payload: { ...secondStep!.payload, targetLineIndex: 0 },
+    });
+
+    expect(state.players[0].lines[0].cards).toHaveLength(2);
+    expect(state.players[0].lines[0].cards[1].face).toBe(CardFace.FaceDown);
+    expect(state.players[0].lines[1].cards).toHaveLength(0);
+    expect(state.effectQueue).toHaveLength(0);
   });
 
   it("does nothing to empty lines", () => {
@@ -983,10 +1067,11 @@ describe("executeEffect — deck_to_each_line (lif_0)", () => {
     expect(state.players[0].lines[0].cards).toHaveLength(0);
     expect(state.players[0].lines[1].cards).toHaveLength(0);
     expect(state.players[0].lines[2].cards).toHaveLength(0);
+    expect(state.effectQueue).toHaveLength(0);
     expect(state.players[0].deckSize).toBe(1); // deck untouched
   });
 
-  it("reduces deckSize by the number of occupied lines", () => {
+  it("reduces deckSize by the number of processed occupied lines", () => {
     const state = makeState();
     state.players[0].lines[0].cards.push(card("c0"));
     state.players[0].lines[1].cards.push(card("c1"));
@@ -995,6 +1080,15 @@ describe("executeEffect — deck_to_each_line (lif_0)", () => {
     state.players[0].deckSize = 3;
 
     executeEffect(state, effect("deck_to_each_line", 0));
+
+    while (state.effectQueue.length > 0) {
+      const step = state.effectQueue.shift()!;
+      const remaining = step.payload.remainingLineIndices as number[];
+      executeEffect(state, {
+        ...step,
+        payload: { ...step.payload, targetLineIndex: remaining[0] },
+      });
+    }
 
     expect(state.players[0].deckSize).toBe(0);
   });
@@ -2253,7 +2347,7 @@ describe("executeEffect — delete", () => {
     expect(state.players[0].lines[0].cards).toHaveLength(1);
   });
 
-  it("each_other_line: deletes top card from each non-source line", () => {
+  it("each_other_line: resolves one selected non-source line at a time", () => {
     const state = makeState();
     const src = card("src", CardFace.FaceUp);
     const a = card("a", CardFace.FaceUp);
@@ -2265,9 +2359,34 @@ describe("executeEffect — delete", () => {
     executeEffect(state, effect("delete", 0, { targets: "each_other_line" }, "src"));
 
     expect(state.players[0].lines[0].cards).toHaveLength(1); // src untouched
+    expect(state.players[0].lines[1].cards).toHaveLength(1);
+    expect(state.players[0].lines[2].cards).toHaveLength(1);
+    expect(state.trashes[0]).toHaveLength(0);
+    expect(state.effectQueue).toHaveLength(1);
+
+    const firstStep = state.effectQueue.shift();
+    expect(firstStep).toBeTruthy();
+    executeEffect(state, {
+      ...firstStep!,
+      payload: { ...firstStep!.payload, targetLineIndex: 2 },
+    });
+
+    expect(state.players[0].lines[1].cards).toHaveLength(1);
+    expect(state.players[0].lines[2].cards).toHaveLength(0);
+    expect(state.trashes[0]).toHaveLength(1);
+    expect(state.effectQueue).toHaveLength(1);
+
+    const secondStep = state.effectQueue.shift();
+    expect(secondStep).toBeTruthy();
+    executeEffect(state, {
+      ...secondStep!,
+      payload: { ...secondStep!.payload, targetLineIndex: 1 },
+    });
+
     expect(state.players[0].lines[1].cards).toHaveLength(0);
     expect(state.players[0].lines[2].cards).toHaveLength(0);
     expect(state.trashes[0]).toHaveLength(2);
+    expect(state.effectQueue).toHaveLength(0);
   });
 
   it("line_values_1_2: deletes all value-1/2 cards in the chosen line", () => {
@@ -4273,20 +4392,44 @@ describe("executeEffect — swap_top_deck_draws (cha_0 / asm_4)", () => {
 // ─── flip_covered_in_each_line ────────────────────────────────────────────────
 
 describe("executeEffect — flip_covered_in_each_line (cha_0 immediate)", () => {
-  it("flips the deepest covered card in each line for both players", () => {
+  it("queues staged line picks and flips covered cards in chosen order", () => {
     const state = makeState();
-    const bot = { instanceId: "bot", defId: "spd_1", face: CardFace.FaceDown as CardFace };
+    const bot = { instanceId: "bot", defId: "hat_3", face: CardFace.FaceDown as CardFace };
     const mid = { instanceId: "mid", defId: "spd_3", face: CardFace.FaceUp  as CardFace };
     const top = { instanceId: "top", defId: "spd_5", face: CardFace.FaceUp  as CardFace };
     state.players[0].lines[0].cards = [bot, mid, top];
+    state.players[1].lines[2].cards = [
+      { instanceId: "opp-bot", defId: "hat_3", face: CardFace.FaceDown as CardFace },
+      { instanceId: "opp-top", defId: "spd_3", face: CardFace.FaceUp as CardFace },
+    ];
 
     executeEffect(state, effect("flip_covered_in_each_line", 0, {}));
 
-    // bot (deepest covered, index 0) should be flipped to FaceUp
+    expect(state.effectQueue).toHaveLength(1);
+    expect(state.players[0].lines[0].cards[0].face).toBe(CardFace.FaceDown);
+
+    const firstStep = state.effectQueue.shift();
+    expect(firstStep).toBeTruthy();
+    executeEffect(state, {
+      ...firstStep!,
+      payload: { ...firstStep!.payload, targetLineIndex: 5 },
+    });
+
+    expect(state.players[1].lines[2].cards[0].face).toBe(CardFace.FaceUp);
+    expect(state.effectQueue).toHaveLength(1);
+
+    const secondStep = state.effectQueue.shift();
+    expect(secondStep).toBeTruthy();
+    executeEffect(state, {
+      ...secondStep!,
+      payload: { ...secondStep!.payload, targetLineIndex: 0 },
+    });
+
     expect(state.players[0].lines[0].cards[0].face).toBe(CardFace.FaceUp);
+    expect(state.effectQueue).toHaveLength(0);
   });
 
-  it("skips lines with fewer than 2 cards (no covered cards)", () => {
+  it("does nothing when there are no covered cards in any line", () => {
     const state = makeState();
     const solo = { instanceId: "solo", defId: "spd_3", face: CardFace.FaceUp as CardFace };
     state.players[0].lines[0].cards = [solo];
@@ -4294,6 +4437,7 @@ describe("executeEffect — flip_covered_in_each_line (cha_0 immediate)", () => 
     executeEffect(state, effect("flip_covered_in_each_line", 0, {}));
 
     expect(state.players[0].lines[0].cards[0].face).toBe(CardFace.FaceUp);
+    expect(state.effectQueue).toHaveLength(0);
   });
 });
 

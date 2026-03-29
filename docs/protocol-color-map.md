@@ -50,72 +50,100 @@ UNI[Unity]
 ASM[Assimilation]
 end
 
-style APY fill:#3a3a44,stroke:#8899aa,stroke-width:4px,color:#ffffff
-style DRK fill:#140828,stroke:#4422cc,stroke-width:4px,color:#ffffff
-style DTH fill:#500808,stroke:#ddd8bb,stroke-width:4px,color:#ffffff
-style FIR fill:#6a1800,stroke:#ff6600,stroke-width:4px,color:#ffffff
-style MTL fill:#0e1c28,stroke:#60c0ff,stroke-width:4px,color:#ffffff
-style PLG fill:#1e3a00,stroke:#aadd00,stroke-width:4px,color:#ffffff
-style PSY fill:#2a0a52,stroke:#7a7dff,stroke-width:4px,color:#ffffff
-style SPD fill:#04220f,stroke:#00ffc2,stroke-width:4px,color:#ffffff
-style SPR fill:#3c0260,stroke:#dd99ff,stroke-width:4px,color:#ffffff
-style WTR fill:#061850,stroke:#2f7dff,stroke-width:4px,color:#ffffff
+style APY fill:#704661,stroke:#768c93,stroke-width:4px,color:#ffffff
+style DRK fill:#1f2140,stroke:#451eca,stroke-width:4px,color:#ffffff
+style DTH fill:#52090b,stroke:#e3d8b6,stroke-width:4px,color:#ffffff
+style FIR fill:#6c1800,stroke:#ff6501,stroke-width:4px,color:#ffffff
+style MTL fill:#003140,stroke:#083859,stroke-width:4px,color:#ffffff
+style PLG fill:#5e4812,stroke:#97e308,stroke-width:4px,color:#ffffff
+style PSY fill:#2b0b4f,stroke:#001d71,stroke-width:4px,color:#ffffff
+style SPD fill:#403206,stroke:#00ffc3,stroke-width:4px,color:#ffffff
+style SPR fill:#290056,stroke:#e79dfc,stroke-width:4px,color:#ffffff
+style WTR fill:#0d44a1,stroke:#317cff,stroke-width:4px,color:#ffffff
 
-style GRV fill:#2a1808,stroke:#ccaa44,stroke-width:4px,color:#ffffff
-style LIF fill:#084a1a,stroke:#22dd55,stroke-width:4px,color:#ffffff
-style LGT fill:#483e00,stroke:#ffee00,stroke-width:4px,color:#ffffff
-style LCK fill:#6a3b00,stroke:#ffb703,stroke-width:4px,color:#ffffff
-style SMK fill:#3a2a18,stroke:#a8b0c0,stroke-width:4px,color:#ffffff
-style CLR fill:#0f4c5c,stroke:#9ffcff,stroke-width:4px,color:#ffffff
-style TIM fill:#4a235a,stroke:#f1c0e8,stroke-width:4px,color:#ffffff
-style FEA fill:#3d2c2e,stroke:#ff7b72,stroke-width:4px,color:#ffffff
-style WAR fill:#1a1c14,stroke:#c44b2b,stroke-width:4px,color:#ffffff
-style ICE fill:#123b5d,stroke:#8ecae6,stroke-width:4px,color:#ffffff
-style CHA fill:#100818,stroke:#ff00ff,stroke-width:4px,color:#ffffff
-style MIR fill:#1c2028,stroke:#e8f0f8,stroke-width:4px,color:#ffffff
-style PEA fill:#1d3a2a,stroke:#9be7b0,stroke-width:4px,color:#ffffff
-style CRG fill:#1e2040,stroke:#4da3ff,stroke-width:4px,color:#ffffff
-style COR fill:#2d132c,stroke:#80ed99,stroke-width:4px,color:#ffffff
+style GRV fill:#402b21,stroke:#9c8724,stroke-width:4px,color:#ffffff
+style LIF fill:#0c4c1b,stroke:#0ee458,stroke-width:4px,color:#ffffff
+style LGT fill:#134008,stroke:#ffee09,stroke-width:4px,color:#ffffff
+style LCK fill:#6b3f02,stroke:#ffbc00,stroke-width:4px,color:#ffffff
+style SMK fill:#402e15,stroke:#ccc9fb,stroke-width:4px,color:#ffffff
+style CLR fill:#9a7766,stroke:#a7ffff,stroke-width:4px,color:#ffffff
+style TIM fill:#818352,stroke:#ffd482,stroke-width:4px,color:#ffffff
+style FEA fill:#595881,stroke:#ff7a6f,stroke-width:4px,color:#ffffff
+style WAR fill:#334029,stroke:#b6361a,stroke-width:4px,color:#ffffff
+style ICE fill:#008bb9,stroke:#92cbe8,stroke-width:4px,color:#ffffff
+style CHA fill:#40252f,stroke:#ff00ff,stroke-width:4px,color:#ffffff
+style MIR fill:#051140,stroke:#ccf0ff,stroke-width:4px,color:#ffffff
+style PEA fill:#094421,stroke:#cef9c7,stroke-width:4px,color:#ffffff
+style CRG fill:#282440,stroke:#18a0ff,stroke-width:4px,color:#ffffff
+style COR fill:#40193c,stroke:#8cee9a,stroke-width:4px,color:#ffffff
 
-style LOV fill:#3c0820,stroke:#ff88aa,stroke-width:4px,color:#ffffff
-style HAT fill:#580820,stroke:#ff0044,stroke-width:4px,color:#ffffff
+style LOV fill:#400a23,stroke:#fe8fb8,stroke-width:4px,color:#ffffff
+style HAT fill:#5c0026,stroke:#ff0042,stroke-width:4px,color:#ffffff
 
-style DIV fill:#5b2d91,stroke:#c77dff,stroke-width:4px,color:#ffffff
-style UNI fill:#1c2c1a,stroke:#88cc80,stroke-width:4px,color:#ffffff
-style ASM fill:#2a2f10,stroke:#e9ff70,stroke-width:4px,color:#ffffff
+style DIV fill:#923db1,stroke:#af5aef,stroke-width:4px,color:#ffffff
+style UNI fill:#193945,stroke:#0ec8bb,stroke-width:4px,color:#ffffff
+style ASM fill:#0e3540,stroke:#e9ff70,stroke-width:4px,color:#ffffff
 ```
 
 ## Hex Table
 
 | Protocol | Primary | Accent |
 |---|---|---|
-| Apathy | `#3a3a44` | `#8899aa` |
-| Darkness | `#140828` | `#4422cc` |
-| Death | `#500808` | `#ddd8bb` |
-| Fire | `#6a1800` | `#ff6600` |
-| Gravity | `#2a1808` | `#ccaa44` |
-| Hate | `#580820` | `#ff0044` |
-| Life | `#084a1a` | `#22dd55` |
-| Light | `#483e00` | `#ffee00` |
-| Love | `#3c0820` | `#ff88aa` |
-| Metal | `#0e1c28` | `#60c0ff` |
-| Plague | `#1e3a00` | `#aadd00` |
-| Psychic | `#2a0a52` | `#7a7dff` |
-| Speed | `#04220f` | `#00ffc2` |
-| Spirit | `#3c0260` | `#dd99ff` |
-| Water | `#061850` | `#2f7dff` |
-| Diversity | `#5b2d91` | `#c77dff` |
-| Luck | `#6a3b00` | `#ffb703` |
-| Smoke | `#3a2a18` | `#a8b0c0` |
-| Clarity | `#0f4c5c` | `#9ffcff` |
-| Unity | `#1c2c1a` | `#88cc80` |
-| Time | `#4a235a` | `#f1c0e8` |
-| Fear | `#3d2c2e` | `#ff7b72` |
-| War | `#1a1c14` | `#c44b2b` |
-| Ice | `#123b5d` | `#8ecae6` |
-| Chaos | `#100818` | `#ff00ff` |
-| Mirror | `#1c2028` | `#e8f0f8` |
-| Peace | `#1d3a2a` | `#9be7b0` |
-| Assimilation | `#2a2f10` | `#e9ff70` |
-| Courage | `#1e2040` | `#4da3ff` |
-| Corruption | `#2d132c` | `#80ed99` |
+| Apathy | `#704661` | `#768c93` |
+| Darkness | `#1f2140` | `#451eca` |
+| Death | `#52090b` | `#e3d8b6` |
+| Fire | `#6c1800` | `#ff6501` |
+| Gravity | `#402b21` | `#9c8724` |
+| Hate | `#5c0026` | `#ff0042` |
+| Life | `#0c4c1b` | `#0ee458` |
+| Light | `#134008` | `#ffee09` |
+| Love | `#400a23` | `#fe8fb8` |
+| Metal | `#003140` | `#083859` |
+| Plague | `#5e4812` | `#97e308` |
+| Psychic | `#2b0b4f` | `#001d71` |
+| Speed | `#403206` | `#00ffc3` |
+| Spirit | `#290056` | `#e79dfc` |
+| Water | `#0d44a1` | `#317cff` |
+| Diversity | `#923db1` | `#af5aef` |
+| Luck | `#6b3f02` | `#ffbc00` |
+| Smoke | `#402e15` | `#ccc9fb` |
+| Clarity | `#9a7766` | `#a7ffff` |
+| Unity | `#193945` | `#0ec8bb` |
+| Time | `#818352` | `#ffd482` |
+| Fear | `#595881` | `#ff7a6f` |
+| War | `#334029` | `#b6361a` |
+| Ice | `#008bb9` | `#92cbe8` |
+| Chaos | `#40252f` | `#ff00ff` |
+| Mirror | `#051140` | `#ccf0ff` |
+| Peace | `#094421` | `#cef9c7` |
+| Assimilation | `#0e3540` | `#e9ff70` |
+| Courage | `#282440` | `#18a0ff` |
+| Corruption | `#40193c` | `#8cee9a` |
+
+## Diversity Pairings and Grayscale Diagram
+
+Pairing metric used:
+
+`diversity(A,B) = deltaE76(primaryA, primaryB) + deltaE76(accentA, accentB)`
+
+Grayscale mapping:
+- Black (`#000000`) = equal colors (score `0`)
+- White (`#ffffff`) = maximum observed pairing score in the current palette
+- Diagram/table show only unique protocol pairs (upper-triangle view); mirrored duplicates and self-comparisons are intentionally omitted.
+
+### 5 Lowest Diversity Pairings
+
+| Rank | Protocol A | Protocol B | Diversity Score |
+|---:|---|---|---:|
+| 1 | Courage | Water | 71.67 |
+| 2 | Life | Plague | 71.67 |
+| 3 | Courage | Metal | 71.69 |
+| 4 | Light | Plague | 71.70 |
+| 5 | Apathy | Smoke | 71.71 |
+
+Full pairings score table:
+- [docs/protocol-diversity-pairings.md](protocol-diversity-pairings.md)
+
+Grayscale diversity diagram:
+
+![Protocol Pair Diversity Heatmap](protocol-diversity-heatmap.svg)

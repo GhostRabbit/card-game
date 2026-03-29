@@ -5,8 +5,11 @@ import {
   CardFace,
   LineState,
   TurnPhase,
+  getOpponentIndex,
 } from "@compile/shared";
 import { ServerGameState, lineValue } from "./GameEngine";
+
+const MAX_VISIBLE_TRASH_CARDS = 14;
 
 function maskCard(card: CardInstance, isOwner: boolean): CardView {
   if (isOwner || card.face === CardFace.FaceUp) return card;
@@ -24,10 +27,12 @@ export function buildPlayerView(
   state: ServerGameState,
   playerIndex: 0 | 1
 ): { view: PlayerView; turnPhase: TurnPhase } {
-  const oi = (1 - playerIndex) as 0 | 1;
+  const oi = getOpponentIndex(playerIndex);
   const player = state.players[playerIndex];
   const opponent = state.players[oi];
   const pending = state.effectQueue[0] ?? null;
+  const ownTrashVisible = state.trashes[playerIndex].slice(-MAX_VISIBLE_TRASH_CARDS);
+  const oppTrashVisible = state.trashes[oi].slice(-MAX_VISIBLE_TRASH_CARDS);
 
   const view: PlayerView = {
     id: player.id,
@@ -36,7 +41,7 @@ export function buildPlayerView(
     hand: player.hand,
     deckSize: player.deckSize,
     trashSize: player.trashSize,
-    trash: state.trashes[playerIndex],
+    trash: ownTrashVisible,
     isActivePlayer: state.activePlayerIndex === playerIndex,
     compilableLines: state.activePlayerIndex === playerIndex ? state.compilableLines : [],
     lines: [
@@ -47,7 +52,8 @@ export function buildPlayerView(
     hasControl: player.hasControl,
     opponentHandSize: opponent.hand.length,
     opponentDeckSize: opponent.deckSize,
-    opponentTrash: state.trashes[oi],
+    opponentTrashSize: opponent.trashSize,
+    opponentTrash: oppTrashVisible,
     opponentLines: [
       maskLine(opponent.lines[0], false),
       maskLine(opponent.lines[1], false),

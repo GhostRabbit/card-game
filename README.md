@@ -50,7 +50,12 @@ See [docs/l2p-compile.md](docs/l2p-compile.md) for the full rules summary.
 **Quick summary:**
 - Draft 3 protocols; your deck = 6 cards per protocol (18 total), shuffled.
 - Each turn: resolve Start effects → check Control → check Compile → take Action (play 1 card or Refresh) → Clear Cache to 5 → resolve End effects.
+- Refresh is only legal if your hand is below 5 cards.
 - Playing **face-up**: card may match either protocol in that line. Playing **face-down**: any line.
+- Targeting defaults to uncovered cards unless a card explicitly says covered/all (or refers to an implied specific card).
+- For "each" instructions, valid objects are identified first, then the resolving player chooses processing order one at a time.
+- Auto-reshuffle happens only for draw events. Non-draw top-deck effects do nothing if the deck is empty.
+- Start/End effect windows resolve queued effects step-by-step; follow-up effects created during that window continue resolving in that same window.
 - **Compile** a line when its face-up value ≥ 10 AND higher than opponent's same line. Clear the line, flip protocol to Compiled.
 - First to Compile all 3 protocols wins.
 

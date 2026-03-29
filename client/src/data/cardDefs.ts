@@ -147,21 +147,21 @@ export const CARD_DEFS_CLIENT = new Map<string, ClientCardDef>(
 
 /** Hex fill colour for the name bar of each protocol's cards. */
 export const PROTOCOL_COLORS = new Map<string, number>([
-  ["proto_apy", 0x3a3a44],  // Apathy    — flat grey-lavender (lifeless, no hue)
-  ["proto_drk", 0x140828],  // Darkness  — void black-purple (near-black)
-  ["proto_dth", 0x500808],  // Death     — deep blood crimson
-  ["proto_fir", 0x6a1800],  // Fire      — burnt orange-red
-  ["proto_grv", 0x2a1808],  // Gravity   — dark earth brown
-  ["proto_hat", 0x580820],  // Hate      — dark hot crimson
-  ["proto_lif", 0x084a1a],  // Life      — rich forest green
-  ["proto_lgt", 0x483e00],  // Light     — dark golden amber
-  ["proto_lov", 0x3c0820],  // Love      — deep dark rose
-  ["proto_mtl", 0x0e1c28],  // Metal     — deep cold navy-steel
-  ["proto_plg", 0x1e3a00],  // Plague    — sickly dark olive
-  ["proto_psy", 0x2a0a52],  // Psychic   — deep amethyst
-  ["proto_spd", 0x04220f],  // Speed     — deep racing green
-  ["proto_spr", 0x3c0260],  // Spirit    — vivid magenta-purple (ethereal, ~290° hue)
-  ["proto_wtr", 0x061850],  // Water     — deep ocean navy (~225° hue, 65° from Spirit)
+  ["proto_apy", 0x704661],
+  ["proto_drk", 0x1f2140],
+  ["proto_dth", 0x52090b],
+  ["proto_fir", 0x6c1800],
+  ["proto_grv", 0x402b21],
+  ["proto_hat", 0x5c0026],
+  ["proto_lif", 0x0c4c1b],
+  ["proto_lgt", 0x134008],
+  ["proto_lov", 0x400a23],
+  ["proto_mtl", 0x003140],
+  ["proto_plg", 0x5e4812],
+  ["proto_psy", 0x2b0b4f],
+  ["proto_spd", 0x403206],
+  ["proto_spr", 0x290056],
+  ["proto_wtr", 0x0d44a1],
   ...GENERATED_MAIN_UNIT_2_PROTOCOL_COLORS,
 ]);
 
@@ -171,21 +171,21 @@ export const PROTOCOL_COLORS = new Map<string, number>([
  * giving every protocol a unique visual identity regardless of hue proximity.
  */
 export const PROTOCOL_ACCENT_COLORS = new Map<string, number>([
-  ["proto_apy", 0x8899aa],  // Apathy    — washed steel grey (desaturated, lifeless)
-  ["proto_drk", 0x4422cc],  // Darkness  — deep indigo glow (cold void)
-  ["proto_dth", 0xddd8bb],  // Death     — pale bone ivory
-  ["proto_fir", 0xff6600],  // Fire      — bright orange flame
-  ["proto_grv", 0xccaa44],  // Gravity   — tarnished gold (cosmic weight)
-  ["proto_hat", 0xff0044],  // Hate      — vivid rage-red
-  ["proto_lif", 0x22dd55],  // Life      — spring green
-  ["proto_lgt", 0xffee00],  // Light     — bright sun yellow
-  ["proto_lov", 0xff88aa],  // Love      — soft romantic rose-pink
-  ["proto_mtl", 0x60c0ff],  // Metal     — bright icy electric blue
-  ["proto_plg", 0xaadd00],  // Plague    — sickly lime (pus-yellow-green)
-  ["proto_psy", 0x7a7dff],  // Psychic   — bright periwinkle
-  ["proto_spd", 0x00ffc2],  // Speed     — neon mint-cyan
-  ["proto_spr", 0xdd99ff],  // Spirit    — ghost lavender
-  ["proto_wtr", 0x2f7dff],  // Water     — saturated cobalt blue
+  ["proto_apy", 0x768c93],
+  ["proto_drk", 0x451eca],
+  ["proto_dth", 0xe3d8b6],
+  ["proto_fir", 0xff6501],
+  ["proto_grv", 0x9c8724],
+  ["proto_hat", 0xff0042],
+  ["proto_lif", 0x0ee458],
+  ["proto_lgt", 0xffee09],
+  ["proto_lov", 0xfe8fb8],
+  ["proto_mtl", 0x083859],
+  ["proto_plg", 0x97e308],
+  ["proto_psy", 0x001d71],
+  ["proto_spd", 0x00ffc3],
+  ["proto_spr", 0xe79dfc],
+  ["proto_wtr", 0x317cff],
   ...GENERATED_MAIN_UNIT_2_PROTOCOL_ACCENT_COLORS,
 ]);
 

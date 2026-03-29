@@ -65,6 +65,13 @@ export interface EffectResolutionContext {
 
 const CLIENT_CARD_DEFS = CARD_DEFS_CLIENT;
 
+function formatCardDisplayName(cardDefId: string | undefined, fallback: string): string {
+  if (!cardDefId) return fallback;
+  const def = CLIENT_CARD_DEFS.get(cardDefId);
+  if (!def) return fallback;
+  return `${def.name} ${def.value}`;
+}
+
 function addHint(
   ctx: EffectResolutionContext,
   hint: string,
@@ -123,12 +130,13 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
   const oppEffect = view.opponentPendingEffect;
 
   if (myEffect) {
-    const effectDescription = `${myEffect.cardName} ▸ ${myEffect.description}`;
+    const effectCardName = formatCardDisplayName(myEffect.cardDefId, myEffect.cardName);
+    const effectDescription = `${effectCardName} ▸ ${myEffect.description}`;
     noteStatus("effect-description", effectDescription);
     // Effect action panel — under zoom card in the focus panel
     addHud(scene.add.rectangle(L.btnCx, L.resetY - 50, L.focusPanelW - 6, 148, 0x091929, 0.94)
       .setStrokeStyle(1.5, ctx.confirmStrokeNum, 0.5));
-    addHud(scene.add.text(L.btnCx, L.resetY - 117, myEffect.cardName.toUpperCase(), {
+    addHud(scene.add.text(L.btnCx, L.resetY - 117, effectCardName.toUpperCase(), {
       fontSize: "10px", fontFamily: "monospace", fontStyle: "bold", color: ctx.hudAccentColor,
     }).setOrigin(0.5));
     addHud(scene.add.text(L.btnCx, L.resetY - 104, myEffect.description, {
@@ -158,7 +166,9 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
       } else {
         const handTargetId = ctx.state.getEffectHandTargetId();
         const hc = view.hand.find(c => "instanceId" in c && (c as CardInstance).instanceId === handTargetId);
-        const handCardName = hc && "defId" in hc ? (CLIENT_CARD_DEFS.get((hc as CardInstance).defId)?.name ?? "Card") : "Card";
+        const handCardName = hc && "defId" in hc
+          ? formatCardDisplayName((hc as CardInstance).defId, "Card")
+          : "Card";
         addHint(ctx, `Discarding ${handCardName} — click a board card to flip ↓`);
       }
     } else if (myEffect.type === "play_facedown") {
@@ -167,7 +177,9 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
       } else {
         const handTargetId = ctx.state.getEffectHandTargetId();
         const hc = view.hand.find(c => "instanceId" in c && (c as CardInstance).instanceId === handTargetId);
-        const handCardName = hc && "defId" in hc ? (CLIENT_CARD_DEFS.get((hc as CardInstance).defId)?.name ?? "Card") : "Card";
+        const handCardName = hc && "defId" in hc
+          ? formatCardDisplayName((hc as CardInstance).defId, "Card")
+          : "Card";
         addHint(ctx, `Playing ${handCardName} face-down — choose a line:`);
         const sourceLine = myEffect.sourceInstanceId ? ctx.findOwnLineOfInstance(myEffect.sourceInstanceId) : null;
         const isLineAllowed = sourceLine == null ? undefined : (li: number) => li !== sourceLine;
@@ -323,9 +335,9 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
       // Show the revealed top deck card in the zoom panel and offer keep / discard.
       const topCard = view.ownRevealedTopDeckCard;
       if (topCard) {
-        const cardName = CLIENT_CARD_DEFS.get(topCard.defId)?.name ?? topCard.defId;
+        const cardName = formatCardDisplayName(topCard.defId, topCard.defId);
         const cardVal  = CLIENT_CARD_DEFS.get(topCard.defId)?.value ?? "?";
-        addHint(ctx, `Top deck: ${topCard.defId}  ·  val ${cardVal}`);
+        addHint(ctx, `Top deck: ${cardName}  ·  val ${cardVal}`);
         // KEEP button
         const keepBtn = scene.add.rectangle(L.btnCx, L.resetY - 20, 200, 32, ctx.confirmFillNum)
           .setStrokeStyle(2, ctx.confirmStrokeNum)
@@ -398,6 +410,17 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
       const hint = ctx.state.getEffectBoardTargetId() ? "Card selected — choose a destination line:" : "Choose a line:";
       addHint(ctx, hint);
 
+      const remainingLineIndices =
+        (myEffect.type === "delete" && (myEffect.payload.targets as string | undefined) === "each_other_line") ||
+        myEffect.type === "deck_to_each_line" ||
+        myEffect.type === "flip_covered_in_each_line"
+          ? (myEffect.payload.remainingLineIndices as number[] | undefined)
+          : undefined;
+      const remainingLineSet =
+        remainingLineIndices && remainingLineIndices.length > 0
+          ? new Set(remainingLineIndices)
+          : null;
+
       const isGravity1Shift =
         myEffect.type === "shift" &&
         ((myEffect.payload.targets as string | undefined) === undefined) &&
@@ -422,6 +445,12 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
           }
         : undefined;
 
+      const combinedIsLineAllowed = isLineAllowed
+        ? (li: number) => isLineAllowed(li) && (!remainingLineSet || remainingLineSet.has(li))
+        : remainingLineSet
+          ? (li: number) => remainingLineSet.has(li)
+          : undefined;
+
       ctx.renderLinePicker(spec.lineScope!, (li) => {
         ctx.emitResolveEffect({
           id: myEffect.id,
@@ -429,11 +458,12 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
           targetLineIndex: li,
         });
         ctx.state.setEffectBoardTargetId(null);
-      }, isLineAllowed);
+      }, combinedIsLineAllowed);
     }
   } else if (oppEffect) {
+    const oppEffectCardName = formatCardDisplayName(oppEffect.cardDefId, oppEffect.cardName);
     noteStatus("effect-opponent-title", "Opponent resolving...");
-    const oppDescription = `[${oppEffect.cardName}] ${oppEffect.description}`;
+    const oppDescription = `[${oppEffectCardName}] ${oppEffect.description}`;
     noteStatus("effect-opponent-description", oppDescription);
     // Opponent effect panel — focus panel bottom area
     addHud(scene.add.rectangle(L.btnCx, L.resetY - 50, L.focusPanelW - 6, 148, 0x0e0a18, 0.94)
@@ -441,7 +471,7 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
     addHud(scene.add.text(L.btnCx, L.resetY - 117, "OPPONENT RESOLVING", {
       fontSize: "10px", fontFamily: "monospace", fontStyle: "bold", color: "#ff8ca0",
     }).setOrigin(0.5));
-    addHud(scene.add.text(L.btnCx, L.resetY - 103, oppEffect.cardName.toUpperCase(), {
+    addHud(scene.add.text(L.btnCx, L.resetY - 103, oppEffectCardName.toUpperCase(), {
       fontSize: "11px", fontFamily: "monospace", fontStyle: "bold", color: "#ffdce5",
     }).setOrigin(0.5));
     addHud(scene.add.text(L.btnCx, L.resetY - 88, oppEffect.description, {

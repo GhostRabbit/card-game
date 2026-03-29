@@ -1,8 +1,9 @@
-import { CardFace, CardInstance, PendingEffect } from "@compile/shared";
+import { CardFace, CardInstance, PendingEffect, getOpponentIndex, findCardByInstanceId, forEachCardInField } from "@compile/shared";
 import { v4 as uuidv4 } from "uuid";
 import { CARD_MAP } from "../data/cards";
 import { ServerGameState, drawCards, discardFromHand, FACE_DOWN_VALUE, lineValue } from "./GameEngine";
 import { shuffle } from "./DraftEngine";
+import { getEffectHandler } from "./effect-handlers";
 
 // ─── Whitelist of stub effect types that are known but not yet implemented ────
 
@@ -29,18 +30,67 @@ export function enqueueEffectsFromCard(
     if (effect.trigger !== trigger) continue;
     if (effect.type === "passive") continue;
 
-    state.effectQueue.push({
-      id: uuidv4(),
-      cardDefId,
-      cardName: def.name,
-      type: effect.type,
-      description: effect.description,
+    enqueueResolvedPendingEffect(
+      state,
       ownerIndex,
+      cardDefId,
+      def.name,
+      effect.type,
+      effect.description,
       trigger,
-      payload: effect.payload ?? {},
+      effect.payload ?? {},
       sourceInstanceId,
-    });
+    );
   }
+}
+
+function enqueueResolvedPendingEffect(
+  state: ServerGameState,
+  ownerIndex: 0 | 1,
+  cardDefId: string,
+  cardName: string,
+  type: string,
+  description: string,
+  trigger: "immediate" | "start" | "end",
+  payload: Record<string, unknown>,
+  sourceInstanceId?: string,
+): void {
+  const oi = getOpponentIndex(ownerIndex);
+
+  if (type === "opponent_discard" || type === "opponent_discard_reveal") {
+    const amount = Math.min(
+      (payload.amount as number) ?? 1,
+      state.players[oi].hand.length,
+    );
+    for (let i = 0; i < amount; i++) {
+      state.effectQueue.push({
+        id: uuidv4(),
+        cardDefId,
+        cardName,
+        type: "discard",
+        description: "Choose a card to discard.",
+        ownerIndex: oi,
+        trigger,
+        payload: type === "opponent_discard_reveal"
+          ? { oppDiscardDrawFor: ownerIndex, revealOpponentHandFor: ownerIndex }
+          : { oppDiscardDrawFor: ownerIndex },
+        sourceInstanceId,
+      });
+    }
+    return;
+  }
+
+  state.effectQueue.push({
+    id: uuidv4(),
+    cardDefId,
+    cardName,
+    type,
+    description,
+    ownerIndex,
+    trigger,
+    payload,
+    sourceInstanceId,
+  });
 }
 
 /**
@@ -82,17 +132,17 @@ export function enqueueEffectsOnFlipFaceUp(
   const toQueue = isCovered ? immediates.slice(0, 1) : immediates;
 
   for (const eff of toQueue) {
-    state.effectQueue.push({
-      id: uuidv4(),
-      cardDefId: flippedCard.defId,
-      cardName: def.name,
-      type: eff.type,
-      description: eff.description,
+    enqueueResolvedPendingEffect(
+      state,
       ownerIndex,
-      trigger: "immediate",
-      payload: eff.payload ?? {},
-      sourceInstanceId: flippedCard.instanceId,
-    });
+      flippedCard.defId,
+      def.name,
+      eff.type,
+      eff.description,
+      "immediate",
+      eff.payload ?? {},
+      flippedCard.instanceId,
+    );
   }
 }
 
@@ -115,17 +165,17 @@ export function enqueueEffectsOnUncover(
   const immediates = def.effects.filter((e) => e.trigger === "immediate");
   // Skip index 0 — that fired on play/flip. Queue everything after.
   for (const eff of immediates.slice(1)) {
-    state.effectQueue.push({
-      id: uuidv4(),
-      cardDefId: uncoveredCard.defId,
-      cardName: def.name,
-      type: eff.type,
-      description: eff.description,
+    enqueueResolvedPendingEffect(
+      state,
       ownerIndex,
-      trigger: "immediate",
-      payload: eff.payload ?? {},
-      sourceInstanceId: uncoveredCard.instanceId,
-    });
+      uncoveredCard.defId,
+      def.name,
+      eff.type,
+      eff.description,
+      "immediate",
+      eff.payload ?? {},
+      uncoveredCard.instanceId,
+    );
   }
 }
 
@@ -214,7 +264,7 @@ export function enqueueEffectsOnCover(
  * Scan a player's face-up line cards for a specific passive type and return
  * all matching cards with their numeric `payload.amount` (defaulting to 1).
  */
-function scanPassives(
+export function scanPassives(
   state: ServerGameState,
   ownerIndex: 0 | 1,
   passiveType: string,
@@ -300,7 +350,7 @@ function pushDeckCardFaceDown(
 }
 
 /** Toggle the face of a card in any line. Returns the card if found. */
-function flipSourceCard(
+export function flipSourceCard(
   state: ServerGameState,
   instanceId: string,
   log: (msg: string) => void,
@@ -357,7 +407,7 @@ function countCardsInFieldByProtocol(state: ServerGameState, protocolId: string)
   return count;
 }
 
-function findSourceLineIndex(
+export function findSourceLineIndex(
   state: ServerGameState,
   ownerIndex: 0 | 1,
   sourceInstanceId: string | undefined,
@@ -401,12 +451,18 @@ export function executeEffect(
   effect: PendingEffect
 ): void {
   const { ownerIndex, cardDefId, type, payload, trigger, sourceInstanceId } = effect;
-  const oi = (1 - ownerIndex) as 0 | 1;
+  const oi = getOpponentIndex(ownerIndex);
   const log = (msg: string) =>
     state.pendingLogs.push(`  EFFECT [${trigger}] ${cardDefId}: ${msg}`);
 
   if (sourceInstanceId && !isSourceCardActive(state, sourceInstanceId)) {
     log(`effect cancelled — source card ${sourceInstanceId} no longer active`);
+    return;
+  }
+
+  const registeredHandler = getEffectHandler(type);
+  if (registeredHandler) {
+    registeredHandler(state, effect, log);
     return;
   }
 
@@ -1059,30 +1115,75 @@ export function executeEffect(
         return false;
       };
 
-      // Auto: delete 1 card from each of the owner's other lines
+      // Player-directed: delete 1 card from each of the owner's other lines,
+      // choosing line processing order one line at a time.
       if (targets === "each_other_line") {
-        let srcLine = -1;
-        if (sourceInstanceId) {
-          for (let li = 0; li < 3; li++) {
-            if (state.players[ownerIndex].lines[li].cards.some((c) => c.instanceId === sourceInstanceId)) {
-              srcLine = li;
-              break;
+        const remainingFromPayload = payload.remainingLineIndices as number[] | undefined;
+
+        const enqueueNextEachOtherLineStep = (remainingLineIndices: number[]) => {
+          state.effectQueue.unshift({
+            id: uuidv4(),
+            cardDefId,
+            cardName: effect.cardName,
+            type: "delete",
+            description: `Choose the next line to process (${remainingLineIndices.length} left).`,
+            ownerIndex,
+            trigger,
+            payload: { ...payload, targets: "each_other_line", remainingLineIndices },
+            sourceInstanceId,
+          });
+        };
+
+        // Initial snapshot of valid lines (other own lines that currently contain cards).
+        if (!remainingFromPayload || remainingFromPayload.length === 0) {
+          let srcLine = -1;
+          if (sourceInstanceId) {
+            for (let li = 0; li < 3; li++) {
+              if (state.players[ownerIndex].lines[li].cards.some((c) => c.instanceId === sourceInstanceId)) {
+                srcLine = li;
+                break;
+              }
             }
           }
-        }
-        for (let li = 0; li < 3; li++) {
-          if (li === srcLine) continue;
-          const line = state.players[ownerIndex].lines[li];
-          if (line.cards.length > 0) {
-            const [trashed] = line.cards.splice(line.cards.length - 1, 1);
-            state.trashes[ownerIndex].push(trashed);
-            state.players[ownerIndex].trashSize = state.trashes[ownerIndex].length;
-            log(`delete each_other_line: removed ${trashed.defId} from line ${li}`);
+
+          const initialRemaining = [0, 1, 2].filter((li) =>
+            li !== srcLine && state.players[ownerIndex].lines[li].cards.length > 0,
+          );
+
+          if (initialRemaining.length === 0) {
+            log("delete each_other_line: no valid other lines to process");
+            break;
           }
+
+          enqueueNextEachOtherLineStep(initialRemaining);
+          break;
         }
-        for (const { card, amount: drawAmt } of scanPassives(state, ownerIndex, "after_delete_draw")) {
-          log(`after_delete_draw (${card.defId}): drawing ${drawAmt}`);
-          drawCards(state, ownerIndex, drawAmt);
+
+        // Step execution: resolve selected line from pre-identified snapshot.
+        if (targetLineIndex === undefined || !remainingFromPayload.includes(targetLineIndex)) {
+          log("delete each_other_line: selected line is not in remaining choices");
+          enqueueNextEachOtherLineStep(remainingFromPayload);
+          break;
+        }
+
+        const selectedLine = targetLineIndex;
+        const line = state.players[ownerIndex].lines[selectedLine];
+        if (line.cards.length > 0) {
+          const [trashed] = line.cards.splice(line.cards.length - 1, 1);
+          state.trashes[ownerIndex].push(trashed);
+          state.players[ownerIndex].trashSize = state.trashes[ownerIndex].length;
+          log(`delete each_other_line: removed ${trashed.defId} from line ${selectedLine}`);
+          for (const { card, amount: drawAmt } of scanPassives(state, ownerIndex, "after_delete_draw")) {
+            log(`after_delete_draw (${card.defId}): drawing ${drawAmt}`);
+            drawCards(state, ownerIndex, drawAmt);
+          }
+        } else {
+          log(`delete each_other_line: line ${selectedLine} had no cards at resolution time`);
+        }
+
+        const nextRemaining = remainingFromPayload.filter((li) => li !== selectedLine);
+        if (nextRemaining.length > 0) {
+          enqueueNextEachOtherLineStep(nextRemaining);
         }
         break;
       }
@@ -1771,15 +1872,48 @@ export function executeEffect(
     }
 
     case "deck_to_each_line": {
-      // Play the top deck card face-down in each line where the owner already
-      // has at least one card.
-      for (let li = 0; li < 3; li++) {
-        const line = state.players[ownerIndex].lines[li];
-        if (line.cards.length > 0) {
-          pushDeckCardFaceDown(state, ownerIndex, line, log);
+      const remainingFromPayload = payload.remainingLineIndices as number[] | undefined;
+      const enqueueNextDeckToEachLineStep = (remainingLineIndices: number[]) => {
+        if (remainingLineIndices.length === 0) return;
+        state.effectQueue.unshift({
+          id: uuidv4(),
+          ownerIndex,
+          cardDefId,
+          cardName: effect.cardName,
+          sourceInstanceId,
+          type: "deck_to_each_line",
+          description: `Choose the next line to process (${remainingLineIndices.length} left).`,
+          trigger,
+          payload: { ...payload, remainingLineIndices },
+        });
+      };
+
+      if (!remainingFromPayload) {
+        const initialRemaining = [0, 1, 2].filter((li) => state.players[ownerIndex].lines[li].cards.length > 0);
+        if (initialRemaining.length === 0) {
+          log("deck_to_each_line: no occupied lines to process");
+          break;
         }
+        enqueueNextDeckToEachLineStep(initialRemaining);
+        break;
       }
-      log("deck_to_each_line: played from deck into each occupied line");
+
+      const selectedLine = payload.targetLineIndex as number | undefined;
+      if (selectedLine == null || !remainingFromPayload.includes(selectedLine)) {
+        log("deck_to_each_line: selected line is not in remaining choices");
+        enqueueNextDeckToEachLineStep(remainingFromPayload);
+        break;
+      }
+
+      if (state.players[ownerIndex].lines[selectedLine].cards.length > 0) {
+        pushDeckCardFaceDown(state, ownerIndex, state.players[ownerIndex].lines[selectedLine], log);
+        log(`deck_to_each_line: processed line ${selectedLine}`);
+      } else {
+        log(`deck_to_each_line: line ${selectedLine} became empty before resolution`);
+      }
+
+      const nextRemaining = remainingFromPayload.filter((li) => li !== selectedLine);
+      if (nextRemaining.length > 0) enqueueNextDeckToEachLineStep(nextRemaining);
       break;
     }
 
@@ -2662,23 +2796,63 @@ export function executeEffect(
     }
 
     case "flip_covered_in_each_line": {
-      // cha_0 immediate: in each line, flip 1 covered card (the deepest covered card)
-      let flipped = 0;
-      for (let pi = 0; pi < 2; pi++) {
-        for (let li = 0; li < 3; li++) {
-          const line = state.players[pi as 0 | 1].lines[li];
-          if (line.cards.length < 2) continue;
-          const covered = line.cards.slice(0, line.cards.length - 1);
-          if (covered.length === 0) continue;
-          const target = covered[0]; // deepest covered card
-          const wasDown = target.face === CardFace.FaceDown;
-          target.face = wasDown ? CardFace.FaceUp : CardFace.FaceDown;
-          log(`flip_covered_in_each_line: P${pi} L${li} flipped ${target.defId} to ${target.face}`);
-          if (wasDown) enqueueEffectsOnFlipFaceUp(state, pi as 0 | 1, target);
-          flipped++;
+      const remainingFromPayload = payload.remainingLineIndices as number[] | undefined;
+      const encodeLine = (pi: 0 | 1, li: number) => (pi * 3) + li;
+      const decodeLine = (encoded: number): { pi: 0 | 1; li: number } =>
+        encoded >= 3 ? { pi: 1, li: encoded - 3 } : { pi: 0, li: encoded };
+      const hasCoveredCard = (pi: 0 | 1, li: number): boolean =>
+        state.players[pi].lines[li].cards.length >= 2;
+      const enqueueNextFlipCoveredEachLineStep = (remainingLineIndices: number[]) => {
+        if (remainingLineIndices.length === 0) return;
+        state.effectQueue.unshift({
+          id: uuidv4(),
+          ownerIndex,
+          cardDefId,
+          cardName: effect.cardName,
+          sourceInstanceId,
+          type: "flip_covered_in_each_line",
+          description: `Choose the next line to process (${remainingLineIndices.length} left).`,
+          trigger,
+          payload: { ...payload, remainingLineIndices },
+        });
+      };
+
+      if (!remainingFromPayload) {
+        const initialRemaining: number[] = [];
+        for (let pi = 0 as 0 | 1; pi <= 1; pi = (pi + 1) as 0 | 1) {
+          for (let li = 0; li < 3; li++) {
+            if (hasCoveredCard(pi, li)) initialRemaining.push(encodeLine(pi, li));
+          }
         }
+        if (initialRemaining.length === 0) {
+          log("flip_covered_in_each_line: no covered cards to process");
+          break;
+        }
+        enqueueNextFlipCoveredEachLineStep(initialRemaining);
+        break;
       }
-      log(`flip_covered_in_each_line: flipped ${flipped} card(s)`);
+
+      const selectedEncoded = payload.targetLineIndex as number | undefined;
+      if (selectedEncoded == null || !remainingFromPayload.includes(selectedEncoded)) {
+        log("flip_covered_in_each_line: selected line is not in remaining choices");
+        enqueueNextFlipCoveredEachLineStep(remainingFromPayload);
+        break;
+      }
+
+      const { pi, li } = decodeLine(selectedEncoded);
+      const line = state.players[pi].lines[li];
+      if (line.cards.length >= 2) {
+        const target = line.cards[0]; // deepest covered card
+        const wasDown = target.face === CardFace.FaceDown;
+        target.face = wasDown ? CardFace.FaceUp : CardFace.FaceDown;
+        log(`flip_covered_in_each_line: P${pi} L${li} flipped ${target.defId} to ${target.face}`);
+        if (wasDown) enqueueEffectsOnFlipFaceUp(state, pi, target);
+      } else {
+        log(`flip_covered_in_each_line: P${pi} L${li} had no covered cards at resolution time`);
+      }
+
+      const nextRemaining = remainingFromPayload.filter((encoded) => encoded !== selectedEncoded);
+      if (nextRemaining.length > 0) enqueueNextFlipCoveredEachLineStep(nextRemaining);
       break;
     }
 

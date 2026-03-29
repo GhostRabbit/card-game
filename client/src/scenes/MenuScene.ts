@@ -89,7 +89,7 @@ export class MenuScene extends Phaser.Scene {
       fontFamily: "monospace",
       color: "#95b7d8",
       fontStyle: "bold",
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setY(login.subtitleY + 20);
 
     // Username
     this.add.text(login.labelX, login.userY, "USERNAME", {
@@ -190,7 +190,7 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Protocol set selector
-    this.add.text(width / 2, height * 0.64, "AVAILABLE PROTOCOL SETS", {
+    this.add.text(width / 2, height * 0.64 - 12, "AVAILABLE PROTOCOL SETS", {
       fontSize: "12px", fontFamily: "monospace", color: theme.textMuted,
     }).setOrigin(0.5);
     const setItems: { setId: ProtocolSet; label: string }[] = [
@@ -249,7 +249,7 @@ export class MenuScene extends Phaser.Scene {
     refreshSetButtons();
 
     // Draft variant selector
-    this.add.text(width / 2, height * 0.75, "DRAFT VARIANT", {
+    this.add.text(width / 2, height * 0.75 - 12, "DRAFT VARIANT", {
       fontSize: "12px", fontFamily: "monospace", color: theme.textMuted,
     }).setOrigin(0.5);
     const variantItems: { variant: DraftVariant; label: string; desc: string }[] = [

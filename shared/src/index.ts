@@ -119,6 +119,7 @@ export interface PlayerView extends Omit<PlayerState, "hand"> {
   compilableLines: number[]; // line indices the active player MUST compile this turn
   opponentHandSize: number;
   opponentDeckSize: number;
+  opponentTrashSize: number;
   opponentTrash: CardInstance[];  // opponent discard pile — open information
   opponentLines: [LineState & { cards: CardView[] }, LineState & { cards: CardView[] }, LineState & { cards: CardView[] }];
   opponentProtocols: PlayerState["protocols"];
@@ -217,3 +218,6 @@ export interface ClientToServerEvents {
   refresh: () => void;
   resolve_control_reorder: (payload: { whose?: "self" | "opponent"; newProtocolOrder?: string[] }) => void;
 }
+
+// ─── Re-export shared game helpers ────────────────────────────────────────────
+export * from "./game-helpers";

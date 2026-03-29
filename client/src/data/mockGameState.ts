@@ -44,6 +44,7 @@ export function createMockView(): { view: PlayerView; turnPhase: TurnPhase } {
     compilableLines: [],
     opponentHandSize: 4,
     opponentDeckSize: 11,
+    opponentTrashSize: 3,
     opponentLines: [
       { cards: [
           { instanceId: "o0a", defId: "drk_1",  face: CardFace.FaceUp },
@@ -188,6 +189,7 @@ export function createRandomizedMockView(): { view: PlayerView; turnPhase: TurnP
     compilableLines: [],
     opponentHandSize: 4,
     opponentDeckSize: 11,
+    opponentTrashSize: oppTrashDefs.length,
     opponentLines: [
       { cards: [
           oppLine0Visible[0],

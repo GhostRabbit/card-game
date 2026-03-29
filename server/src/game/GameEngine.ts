@@ -1,4 +1,4 @@
-import { CardInstance, CardFace, GameState, PendingEffect, PlayerState, TurnPhase } from "@compile/shared";
+import { CardInstance, CardFace, GameState, PendingEffect, PlayerState, TurnPhase, getOpponentIndex } from "@compile/shared";
 import { v4 as uuidv4 } from "uuid";
 import { CARD_MAP } from "../data/cards";
 import { shuffle } from "./DraftEngine";
@@ -122,7 +122,7 @@ export const FACE_DOWN_VALUE = 2;
  */
 export function lineValue(state: ServerGameState, playerIndex: 0 | 1, lineIndex: number): number {
   const cards = state.players[playerIndex].lines[lineIndex].cards;
-  const oi = (1 - playerIndex) as 0 | 1;
+  const oi = getOpponentIndex(playerIndex);
   const oppCards = state.players[oi].lines[lineIndex].cards;
 
   // Gather passive modifiers from the player's own face-up cards in this line
@@ -211,7 +211,7 @@ function checkPlayDenials(
   lineIndex: number,
   face: CardFace,
 ): string | null {
-  const oi = (1 - playerIndex) as 0 | 1;
+  const oi = getOpponentIndex(playerIndex);
 
   // Line-scoped denials: check the opponent's cards in the SAME line
   for (const card of state.players[oi].lines[lineIndex].cards) {
@@ -284,7 +284,7 @@ export function discardFromHand(state: ServerGameState, playerIndex: 0 | 1, amou
 
 function compileLine(state: ServerGameState, playerIndex: 0 | 1, lineIndex: number): void {
   const pi = playerIndex;
-  const oi = (1 - pi) as 0 | 1;
+  const oi = getOpponentIndex(pi);
   const player = state.players[pi];
   const opponent = state.players[oi];
 
@@ -348,7 +348,7 @@ export function processAutoPhases(state: ServerGameState): void {
   // ── CHECK CONTROL ──────────────────────────────────────────────────────────
   // Control is sticky: only the active player can take control this turn.
   // If they lead 2+ lines they gain it (and opponent loses it); otherwise no change.
-  const oi = (1 - pi) as 0 | 1;
+  const oi = getOpponentIndex(pi);
   let linesLed = 0;
   for (let li = 0; li < 3; li++) {
     const ownVal = lineValue(state, pi, li);

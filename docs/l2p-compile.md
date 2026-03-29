@@ -38,3 +38,11 @@ resolve that text
 - Card text overrides base rules.
 - Manipulation of **Covered Card** require text stating **Covered** or **All**
 
+## Codex-Aligned Rules Nuances
+- Refresh is only legal while you have fewer than 5 cards in hand.
+- Auto-reshuffle is draw-only: if an effect needs the top deck card for a non-draw action and deck is empty, that effect step does nothing.
+- Default targeting is uncovered-only unless text explicitly allows covered/all targets or points to an implied specific card.
+- For "each" instructions, identify all valid objects first, then the resolving player picks the order and resolves one at a time.
+- Start and End windows resolve as a queue: if an effect creates follow-up effects during that window, they continue resolving in the same window before leaving it.
+- Draw/discard can be chained inside one resolution window; each queued step fully resolves before the next queued step.
+

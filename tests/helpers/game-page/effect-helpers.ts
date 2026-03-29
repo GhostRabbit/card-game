@@ -12,14 +12,14 @@ export async function gotoForEffect(
 }
 
 export async function getEffectDescription(page: Page): Promise<string> {
-  const fromDom = await page.locator('[data-testid="effect-description"]').textContent().catch(() => null);
-  if (fromDom) return fromDom;
-
   const fromMap = await page.evaluate(() => {
     const map = (window as any).__GAME_STATUS_TEXT_MAP__ as Record<string, string> | undefined;
     return map?.['effect-description'] ?? '';
   });
-  return fromMap;
+  if (fromMap) return fromMap;
+
+  const fromDom = await page.locator('[data-testid="effect-description"]').textContent().catch(() => null);
+  return fromDom ?? '';
 }
 
 export async function getEffectHint(page: Page): Promise<string> {

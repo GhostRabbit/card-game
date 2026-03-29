@@ -22,6 +22,7 @@ export class CardSprite extends Phaser.GameObjects.Container {
   private readonly cardW: number;
   private readonly cardH: number;
   private readonly uiScale: number;
+  private effectPulseTween: Phaser.Tweens.Tween | null = null;
 
   private px(base: number, min = 1): number {
     return Math.max(min, Math.round(base * this.uiScale));
@@ -129,8 +130,8 @@ export class CardSprite extends Phaser.GameObjects.Container {
     const protoColor  = defId ? protocolColorFromDefId(defId) : 0x1a3a5c;
     const accentColor = defId ? protocolAccentFromDefId(defId) : 0x4488cc;
     this.protoColor  = this.isFaceDown ? 0x666666 : protoColor;
-    this.fillNormal  = this.isFaceDown ? 0x2e2e2e : CardSprite.shadeColor(protoColor, 0.7);
-    this.fillHover   = this.isFaceDown ? 0x3a3a3a : CardSprite.shadeColor(protoColor, 0.82);
+    this.fillNormal  = this.isFaceDown ? 0x2e2e2e : CardSprite.shadeColor(accentColor, 0.7);
+    this.fillHover   = this.isFaceDown ? 0x3a3a3a : CardSprite.shadeColor(accentColor, 0.82);
 
     // ── BackFound ─────────────────────────────────────────────────────────
     const outerStroke = scene.add.rectangle(0, 0, this.cardW + this.px(2), this.cardH + this.px(2), 0x000000, 0)
@@ -197,13 +198,14 @@ export class CardSprite extends Phaser.GameObjects.Container {
   ): void {
     const hH = this.cardH / 2;
     const hW = this.cardW / 2;
-    const titleTextColor = CardSprite.oppositeHueCss(accentColor);
+    const nameBarFill = protoColor;
+    const titleTextColor = CardSprite.oppositeHueCss(nameBarFill);
     const nameBarH = this.px(22);
     const namePadX = this.px(6);
     const valueInset = this.px(11);
 
-    // Name bar — top 22px strip, vivid accent colour
-    this.add(scene.add.rectangle(0, -hH + nameBarH / 2, this.cardW, nameBarH, accentColor));
+    // Name bar — use the same title fill color as protocol names on the board lines.
+    this.add(scene.add.rectangle(0, -hH + nameBarH / 2, this.cardW, nameBarH, nameBarFill));
     this.add(scene.add.text(-hW + namePadX, -hH + nameBarH / 2, def.name, {
       fontSize: this.fpx(9),
       fontFamily: "monospace",
@@ -218,7 +220,7 @@ export class CardSprite extends Phaser.GameObjects.Container {
 
 
     // Value chip — top-right corner
-    this.add(this.valueChip(scene, def.value, cardTextColor, CardSprite.shadeColor(cardBgFill, 0.6), false));
+    this.add(this.valueChip(scene, def.value, titleTextColor, CardSprite.shadeColor(cardBgFill, 0.6), false, true));
 
     // Dynamic section layout (top / mid / bot). Empty sections render as '-'.
     const allSections = [
@@ -386,7 +388,8 @@ export class CardSprite extends Phaser.GameObjects.Container {
     value: number,
     textColor: string,
     bgColor: number,
-    muted: boolean
+    muted: boolean,
+    titleStyle = false
   ): Phaser.GameObjects.Container {
     const chipInset = this.px(11);
     const chipRadius = this.px(10);
@@ -397,6 +400,11 @@ export class CardSprite extends Phaser.GameObjects.Container {
       fontFamily: "monospace",
       color: textColor,
       fontStyle: "bold",
+      stroke: titleStyle ? "#000000" : undefined,
+      strokeThickness: titleStyle ? this.px(2) : 0,
+      shadow: titleStyle
+        ? { offsetX: this.px(1), offsetY: this.px(1), color: "#000000", blur: 0, stroke: false, fill: true }
+        : undefined,
     }).setOrigin(0.5));
     return chip;
   }
@@ -449,7 +457,34 @@ export class CardSprite extends Phaser.GameObjects.Container {
     this.bg.on("pointerout", stopHold);
   }
 
+  /** Highlights the card as an active-effect source with a slow pulse animation. */
+  setEffectPulse(active: boolean): void {
+    if (this.effectPulseTween) {
+      this.effectPulseTween.stop();
+      this.effectPulseTween = null;
+    }
+
+    if (!active) {
+      this.setScale(1);
+      return;
+    }
+
+    this.effectPulseTween = this.scene.tweens.add({
+      targets: this,
+      scaleX: 1.04,
+      scaleY: 1.04,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.InOut",
+    });
+  }
+
   override destroy(fromScene?: boolean): void {
+    if (this.effectPulseTween) {
+      this.effectPulseTween.stop();
+      this.effectPulseTween = null;
+    }
     super.destroy(fromScene);
   }
 

@@ -26,6 +26,26 @@ interface HudStatusText {
 
 const LINE_COLORS = [0x2200aa, 0x008822, 0xaa6600];
 
+function shadeColor(color: number, factor: number): number {
+  const r = Math.max(0, Math.min(255, Math.round(((color >> 16) & 0xff) * factor)));
+  const g = Math.max(0, Math.min(255, Math.round(((color >> 8) & 0xff) * factor)));
+  const b = Math.max(0, Math.min(255, Math.round((color & 0xff) * factor)));
+  return (r << 16) | (g << 8) | b;
+}
+
+function blendColors(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 0xff;
+  const ag = (a >> 8) & 0xff;
+  const ab = a & 0xff;
+  const br = (b >> 16) & 0xff;
+  const bg = (b >> 8) & 0xff;
+  const bb = b & 0xff;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const b2 = Math.round(ab + (bb - ab) * t);
+  return (r << 16) | (g << 8) | b2;
+}
+
 export class GameScene extends Phaser.Scene {
   private static readonly PHASE_HIGHLIGHT_MS = 500;
   private myIndex: 0 | 1 = 0;
@@ -153,17 +173,19 @@ export class GameScene extends Phaser.Scene {
     const zoneH  = 210;   // height of each line zone
     const pileW  = 220;   // width of the discard/draw pile column
     const stripH = 38;    // height of the mid-strip between opponent and own zones
-    const gap    = 14;    // gap between a zone edge and the strip edge
-    const hudH   = 85;    // vertical space consumed by the top HUD
+    const gap    = 36;    // gap between a zone edge and the strip edge (includes status-message lane)
+    const hudH   = 64;    // vertical space consumed by the top HUD
+    const boardOffsetY = -22; // keep the playable field high to reduce dead space above the board
     const padL   = 20;    // left padding before the first column centre (shift board west)
     const pitch  = 330;   // horizontal distance between column centres
     const lineToFocusGutter = 120; // reserved lane between lines and focus area (control token gutter)
     const padR   = 20;    // right padding
 
     // ── Derived vertical positions ──────────────────────────────────────────
-    const oppCy  = hudH  + zoneH  / 2;
+    const oppCy  = hudH  + zoneH  / 2 + boardOffsetY;
     const midY   = oppCy + zoneH  / 2 + gap + stripH / 2;
     const ownCy  = midY  + stripH / 2 + gap + zoneH  / 2;
+    const statusY = oppCy + zoneH / 2 + gap / 2;
 
     // ── Horizontal positions ────────────────────────────────────────────────
     const col0   = padL + zoneW / 2;
@@ -187,7 +209,7 @@ export class GameScene extends Phaser.Scene {
     const handLeft  = 30;
     const handRight = focusPanelCx - focusPanelW / 2 - 20;
 
-    return { W, H, zoneW, zoneH, pileW, stripH, hudH, lineCx, oppCy, ownCy, midY, pileCx, btnCx, resetY, faceDownY, handY, handLeft, handRight, focusPanelCx, focusPanelW };
+    return { W, H, zoneW, zoneH, pileW, stripH, hudH, lineCx, oppCy, ownCy, midY, statusY, pileCx, btnCx, resetY, faceDownY, handY, handLeft, handRight, focusPanelCx, focusPanelW };
   }
 
   private ensureTestIdOverlay(): void {
@@ -345,6 +367,12 @@ export class GameScene extends Phaser.Scene {
 
     const effectStack = this.view.effectStack ?? [];
     if (effectStack.length > 0) {
+      const formatEffectCardName = (cardDefId: string | undefined, fallback: string): string => {
+        if (!cardDefId) return fallback;
+        const def = CARD_DEFS_CLIENT.get(cardDefId);
+        if (!def) return fallback;
+        return `${def.name} ${def.value}`;
+      };
       const stackX = 218;
       const stackTopY = 16;
       const rowH = 18;
@@ -365,7 +393,8 @@ export class GameScene extends Phaser.Scene {
       shown.forEach((e, i) => {
         const y = stackTopY + 28 + i * rowH;
         const ownerTag = e.ownerIndex === this.myIndex ? "YOU" : "OPP";
-        const lineText = `${i + 1}. [${ownerTag}] ${e.cardName} :: ${e.description}`;
+        const effectCardName = formatEffectCardName(e.cardDefId, e.cardName);
+        const lineText = `${i + 1}. [${ownerTag}] ${effectCardName} :: ${e.description}`;
         addHud(this.add.text(stackX - 192, y, lineText, {
           fontSize: "11px", fontFamily: "monospace", color: i === 0 ? "#f3fff6" : "#c2d8ea",
           fontStyle: i === 0 ? "bold" : "normal", wordWrap: { width: 382 },
@@ -382,7 +411,12 @@ export class GameScene extends Phaser.Scene {
           .setData("testid", "effect-stack-more"));
       }
 
-      noteStatus("effect-stack", shown.map((e, i) => `${i + 1}. ${e.cardName}: ${e.description}`).join(" | "));
+      noteStatus(
+        "effect-stack",
+        shown
+          .map((e, i) => `${i + 1}. ${formatEffectCardName(e.cardDefId, e.cardName)}: ${e.description}`)
+          .join(" | "),
+      );
     }
 
     const turnStates = ["START", "CONTROL", "COMPILE", "ACTION", "CACHE", "END"] as const;
@@ -595,7 +629,11 @@ export class GameScene extends Phaser.Scene {
     const phaseHint = this.getPhaseHintText(myTurn, isCompileChoice, isEffectResolution);
     if (phaseHint) {
       noteStatus("phase-hint", phaseHint);
-      addHud(this.add.text(L.lineCx[1], 12, phaseHint, {
+      addHud(this.add.rectangle(L.lineCx[1], L.statusY, 760, 26, 0x0d1d2d, 0.86)
+        .setStrokeStyle(1.5, 0x3d5875, 0.9)
+        .setName("status-lane")
+        .setData("testid", "status-lane"));
+      addHud(this.add.text(L.lineCx[1], L.statusY, phaseHint, {
         fontSize: "14px", fontFamily: "monospace", color: "#bdd6eb", align: "center",
         wordWrap: { width: 760 },
       }).setOrigin(0.5)
@@ -786,8 +824,8 @@ export class GameScene extends Phaser.Scene {
       const oppProtoColor = PROTOCOL_COLORS.get(oppProtoId) ?? 0x1a3a5c;
       const myProtoAccent = PROTOCOL_ACCENT_COLORS.get(myProtoId) ?? 0x4488cc;
       const oppProtoAccent = PROTOCOL_ACCENT_COLORS.get(oppProtoId) ?? 0x4488cc;
-      const myProtoTitleColor = this.protocolTitleColor(myProtoAccent);
-      const oppProtoTitleColor = this.protocolTitleColor(oppProtoAccent);
+      const myProtoTitleColor = this.protocolTitleColor(myProtoColor);
+      const oppProtoTitleColor = this.protocolTitleColor(oppProtoColor);
 
       // Strip background
       this.boardGroup.add(
@@ -866,8 +904,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ── Discard / draw pile column ──────────────────────────────────────────
-    this.renderPile(this.view.opponentTrash, this.view.opponentDeckSize, L.pileCx, oppCy, L.pileW, zoneH, "OPP DISCARD", "#cc7744", this.view.opponentHandSize);
-    this.renderPile(this.view.trash, this.view.deckSize, L.pileCx, ownCy, L.pileW, zoneH, "MY DISCARD", "#5599cc", undefined);
+    this.renderPile(this.view.opponentTrash, this.view.opponentTrashSize, this.view.opponentDeckSize, L.pileCx, oppCy, L.pileW, zoneH, "OPP DISCARD", "#cc7744", this.view.opponentHandSize);
+    this.renderPile(this.view.trash, this.view.trashSize, this.view.deckSize, L.pileCx, ownCy, L.pileW, zoneH, "MY DISCARD", "#5599cc", undefined);
 
     // ── Control token (between pile boxes) ─────────────────────────────────
     const iHave = this.view.hasControl;
@@ -932,6 +970,7 @@ export class GameScene extends Phaser.Scene {
 
   private renderPile(
     cards: CardInstance[],
+    trashCount: number,
     deckSize: number,
     cx: number, cy: number,
     pileW: number, pileH: number,
@@ -1000,6 +1039,13 @@ export class GameScene extends Phaser.Scene {
         .setData("testid", isMine ? "draw-pile-count" : "opponent-draw-pile-count")
         .setData("deckSize", deckSize), true);
 
+    this.boardGroup.add(
+      this.add.text(stackCx, topY + 6, `${trashCount}`, {
+        fontSize: "12px", fontFamily: "monospace", color: "#c7d8ea", fontStyle: "bold",
+      }).setOrigin(0.5, 0)
+        .setName(isMine ? "discard-pile-count" : "opponent-discard-pile-count")
+        .setData("testid", isMine ? "discard-pile-count" : "opponent-discard-pile-count"), true);
+
     // Discard card stack (right side gets more vertical room)
     if (cards.length === 0) {
       this.boardGroup.add(
@@ -1037,14 +1083,20 @@ export class GameScene extends Phaser.Scene {
   ): void {
     const compiled = protocolStatus === ProtocolStatus.Compiled;
     const protoIdleColor = PROTOCOL_COLORS.get(protocolId) ?? LINE_COLORS[li];
+    const protoAccentColor = PROTOCOL_ACCENT_COLORS.get(protocolId) ?? protoIdleColor;
+    const cardBodyFill = shadeColor(protoAccentColor, 0.7);
+    const protocolZoneFill = blendColors(0x000000, cardBodyFill, compiled ? 0.32 : 0.25);
+    const zoneFill = validity === "valid"
+      ? blendColors(protocolZoneFill, 0x1d4a46, 0.4)
+      : protocolZoneFill;
 
     // Zone border colour reflects play validity       when a card is selected
     // Valid placement keeps protocol colour, with a slightly wider border.
     const borderColor = protoIdleColor;
     const borderWidth = validity === "valid" ? 3 : 2;
 
-    const zoneBg = this.add.rectangle(cx, cy, zoneW, zoneH,
-      validity === "valid" ? 0x1d4a46 : compiled ? 0x16382f : 0x13263c)
+    const zoneBg = this.add.rectangle(cx, cy, zoneW, zoneH, zoneFill)
+      .setFillStyle(zoneFill, 0.85)
       .setStrokeStyle(borderWidth, borderColor)
       .setName(isOwn ? `own-line-${li}` : `opponent-line-${li}`)
       .setData("testid", isOwn ? "own-line" : "opponent-line")
@@ -1078,6 +1130,7 @@ export class GameScene extends Phaser.Scene {
     const cardHalfH = CardSprite.HEIGHT * cardScale / 2;    // 33px
     const topCardCy = cy + zoneH / 2 - cardHalfH - 8;
     const n = cards.length;
+    const activeEffectSourceId = (this.view.pendingEffect ?? this.view.opponentPendingEffect)?.sourceInstanceId ?? null;
     cards.forEach((card, i) => {
       const isCovered = i < n - 1;
       const cardCy    = topCardCy - (n - 1 - i) * stepPx;
@@ -1118,6 +1171,10 @@ export class GameScene extends Phaser.Scene {
       if (!("hidden" in card) && this.effectBoardTargetId &&
           (card as CardInstance).instanceId === this.effectBoardTargetId) {
         sprite.setSelected(true);
+      }
+      if (!("hidden" in card) && activeEffectSourceId &&
+          (card as CardInstance).instanceId === activeEffectSourceId) {
+        sprite.setEffectPulse(true);
       }
       this.boardGroup.add(sprite, true);
     });
@@ -1435,7 +1492,12 @@ export class GameScene extends Phaser.Scene {
         return { boardMode, handPick: false, needsLine: false, lineScope: null, isOptional: optional ?? false, isAutoExecute: false };
       }
       case "delete": {
-        if (targets === "each_other_line") return auto;
+        if (targets === "each_other_line") {
+          const remaining = payload.remainingLineIndices as number[] | undefined;
+          return remaining && remaining.length > 0
+            ? { boardMode: null, handPick: false, needsLine: true, lineScope: "own", isOptional: false, isAutoExecute: false }
+            : auto;
+        }
         if (targets === "line_values_1_2" || targets === "line_8plus_cards")
           return { boardMode: null, handPick: false, needsLine: true, lineScope: "both", isOptional: false, isAutoExecute: false };
         const boardMode =
@@ -1469,6 +1531,18 @@ export class GameScene extends Phaser.Scene {
         return { boardMode: null, handPick: false, needsLine: false, lineScope: null, isOptional: false, isAutoExecute: false };
       case "trash_to_other_line_facedown":
         return { boardMode: null, handPick: false, needsLine: true, lineScope: "own", isOptional: false, isAutoExecute: false };
+      case "deck_to_each_line": {
+        const remaining = payload.remainingLineIndices as number[] | undefined;
+        return remaining && remaining.length > 0
+          ? { boardMode: null, handPick: false, needsLine: true, lineScope: "own", isOptional: false, isAutoExecute: false }
+          : auto;
+      }
+      case "flip_covered_in_each_line": {
+        const remaining = payload.remainingLineIndices as number[] | undefined;
+        return remaining && remaining.length > 0
+          ? { boardMode: null, handPick: false, needsLine: true, lineScope: "encoded", isOptional: false, isAutoExecute: false }
+          : auto;
+      }
       default:
         return auto;
     }
@@ -1641,7 +1715,10 @@ export class GameScene extends Phaser.Scene {
 
   private getPhaseHintText(myTurn: boolean, isCompileChoice: boolean, isEffectResolution: boolean): string | null {
     if (isEffectResolution) {
-      return null;
+      if (this.view.pendingEffect) {
+        return "Resolve current effect: follow the prompt in the focus panel.";
+      }
+      return "Waiting for your opponent to resolve their effect.";
     }
 
     if (isCompileChoice) {
