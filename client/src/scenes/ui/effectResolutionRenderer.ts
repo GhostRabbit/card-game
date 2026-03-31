@@ -79,7 +79,7 @@ function addHint(
 ): void {
   const { scene, layout: L, noteStatus, addHud } = ctx;
   noteStatus("effect-hint", hint);
-  addHud(scene.add.text(L.btnCx, L.resetY - 50, hint, {
+  addHud(scene.add.text(L.btnCx, L.resetY - 88, hint, {
     fontSize: "13px", fontFamily: "monospace", fontStyle: "bold", color, align: "center",
     wordWrap: { width: L.focusPanelW - 14 },
   }).setOrigin(0.5)
@@ -94,7 +94,11 @@ function addConfirmButton(
   testId = "confirm-effect-button",
 ): void {
   const { scene, layout: L, addHud } = ctx;
-  const btn = scene.add.rectangle(L.btnCx, L.resetY, 200, 36, ctx.confirmFillNum)
+  const hasDesc = description.length > 0;
+  // Unified panel: description (top) + thin divider + ▶ CONFIRM (bottom) — one border, no duplication
+  const panelH = hasDesc ? 70 : 36;
+  const panelCy = L.resetY - (hasDesc ? 17 : 0);
+  const btn = scene.add.rectangle(L.btnCx, panelCy, L.focusPanelW - 10, panelH, ctx.confirmFillNum)
     .setStrokeStyle(2, ctx.confirmStrokeNum)
     .setInteractive({ useHandCursor: true })
     .setName(testId)
@@ -103,9 +107,26 @@ function addConfirmButton(
   btn.on("pointerout",  () => btn.setFillStyle(ctx.confirmFillNum));
   btn.on("pointerdown", onConfirm);
   addHud(btn);
-  addHud(scene.add.text(L.btnCx, L.resetY, "▶  CONFIRM", {
-    fontSize: "13px", fontFamily: "monospace", color: ctx.confirmTextColor, fontStyle: "bold",
-  }).setOrigin(0.5));
+  if (hasDesc) {
+    addHud(scene.add.text(L.btnCx, panelCy - panelH / 2 + 8, description, {
+      fontSize: "11px", fontFamily: "monospace", color: "#dff4ff", align: "center",
+      wordWrap: { width: L.focusPanelW - 20 },
+    }).setOrigin(0.5, 0)
+      .setName(`${testId}-desc`)
+      .setData("testid", `${testId}-desc`));
+    const divY = panelCy + panelH / 2 - 28;
+    const gfx = scene.add.graphics();
+    gfx.lineStyle(1, ctx.confirmStrokeNum, 0.35);
+    gfx.lineBetween(L.btnCx - 85, divY, L.btnCx + 85, divY);
+    addHud(gfx);
+    addHud(scene.add.text(L.btnCx, panelCy + panelH / 2 - 18, "▶  CONFIRM", {
+      fontSize: "13px", fontFamily: "monospace", color: ctx.confirmTextColor, fontStyle: "bold",
+    }).setOrigin(0.5));
+  } else {
+    addHud(scene.add.text(L.btnCx, panelCy, "▶  CONFIRM", {
+      fontSize: "13px", fontFamily: "monospace", color: ctx.confirmTextColor, fontStyle: "bold",
+    }).setOrigin(0.5));
+  }
 }
 
 function addSkipButton(ctx: EffectResolutionContext, onClick: () => void): void {
@@ -124,6 +145,37 @@ function addSkipButton(ctx: EffectResolutionContext, onClick: () => void): void 
   }).setOrigin(0.5));
 }
 
+function addChoiceButton(
+  ctx: EffectResolutionContext,
+  y: number,
+  label: string,
+  colors: { fill: number; hover: number; stroke: number; text: string },
+  onClick: (() => void) | null,
+  testId: string,
+): void {
+  const { scene, layout: L, addHud } = ctx;
+  const btn = scene.add.rectangle(L.btnCx, y, 200, 32, colors.fill)
+    .setStrokeStyle(2, colors.stroke)
+    .setName(testId)
+    .setData("testid", testId);
+
+  if (onClick) {
+    btn.setInteractive({ useHandCursor: true });
+    btn.on("pointerover", () => btn.setFillStyle(colors.hover));
+    btn.on("pointerout", () => btn.setFillStyle(colors.fill));
+    btn.on("pointerdown", onClick);
+  } else {
+    btn.setAlpha(0.7);
+  }
+
+  addHud(btn);
+  addHud(scene.add.text(L.btnCx, y, label, {
+    fontSize: "12px", fontFamily: "monospace", color: colors.text, fontStyle: "bold",
+  }).setOrigin(0.5)
+    .setName(`${testId}-text`)
+    .setData("testid", `${testId}-text`));
+}
+
 export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
   const { scene, layout: L, view, myIndex, addHud, noteStatus } = ctx;
   const myEffect = view.pendingEffect;
@@ -133,16 +185,10 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
     const effectCardName = formatCardDisplayName(myEffect.cardDefId, myEffect.cardName);
     const effectDescription = `${effectCardName} ▸ ${myEffect.description}`;
     noteStatus("effect-description", effectDescription);
-    // Effect action panel — under zoom card in the focus panel
-    addHud(scene.add.rectangle(L.btnCx, L.resetY - 50, L.focusPanelW - 6, 148, 0x091929, 0.94)
-      .setStrokeStyle(1.5, ctx.confirmStrokeNum, 0.5));
-    addHud(scene.add.text(L.btnCx, L.resetY - 117, effectCardName.toUpperCase(), {
+    // Card name label shown above the action area (single source, no duplicate)
+    addHud(scene.add.text(L.btnCx, L.resetY - 112, effectCardName.toUpperCase(), {
       fontSize: "10px", fontFamily: "monospace", fontStyle: "bold", color: ctx.hudAccentColor,
-    }).setOrigin(0.5));
-    addHud(scene.add.text(L.btnCx, L.resetY - 104, myEffect.description, {
-      fontSize: "11px", fontFamily: "monospace", color: "#dff4ff", align: "center",
-      wordWrap: { width: L.focusPanelW - 18 },
-    }).setOrigin(0.5, 0)
+    }).setOrigin(0.5)
       .setName("effect-description")
       .setData("testid", "effect-description"));
 
@@ -191,6 +237,149 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
     } else if (myEffect.type === "exchange_hand" && myEffect.payload.awaitGive !== true) {
       addHint(ctx, "Confirm to take 1 random card from your opponent's hand ↓");
       addConfirmButton(ctx, myEffect.description, () => ctx.emitResolveEffect({ id: myEffect.id }));
+    } else if (myEffect.type === "flip_or_draw") {
+      const boardTargetId = ctx.state.getEffectBoardTargetId();
+      const allBoardCards: Array<{ card: CardView; pi: 0 | 1; idx: number; total: number }> = [];
+      const ownPi = myIndex;
+      const oppPi = (1 - myIndex) as 0 | 1;
+      for (let li = 0; li < 3; li++) {
+        const ownCards = view.lines[li].cards;
+        ownCards.forEach((c, idx) => allBoardCards.push({ card: c, pi: ownPi, idx, total: ownCards.length }));
+        const oppCards = view.opponentLines[li].cards;
+        oppCards.forEach((c, idx) => allBoardCards.push({ card: c, pi: oppPi, idx, total: oppCards.length }));
+      }
+
+      const hasValidTarget = allBoardCards.some(({ card, pi, idx, total }) =>
+        ctx.isBoardCardValidForEffect(card, pi, idx, total, myEffect)
+      );
+      const selectedBoardCard = boardTargetId
+        ? allBoardCards.find(({ card }) => !('hidden' in card) && (card as CardInstance).instanceId === boardTargetId)?.card
+        : null;
+      const flipY = L.resetY - 18;
+      const drawY = L.resetY + 18;
+
+      if (!hasValidTarget) {
+        addHint(ctx, "No flippable cards. Draw 1 card to continue.", "#cdb8b8");
+        addChoiceButton(ctx, flipY, "FLIP  (no valid target)", {
+          fill: 0x18263a,
+          hover: 0x18263a,
+          stroke: 0x3a5570,
+          text: "#6c8ca8",
+        }, null, "flip-choice-button");
+      } else if (!selectedBoardCard || 'hidden' in selectedBoardCard) {
+        addHint(ctx, "Select a board card to flip, or draw 1 card.");
+        addChoiceButton(ctx, flipY, "FLIP  (select card on board)", {
+          fill: 0x18263a,
+          hover: 0x18263a,
+          stroke: 0x3a5570,
+          text: "#6c8ca8",
+        }, null, "flip-choice-button");
+      } else {
+        const flipCardName = formatCardDisplayName((selectedBoardCard as CardInstance).defId, "Card");
+        addHint(ctx, `Flip ${flipCardName}, or draw 1 card instead.`);
+        addChoiceButton(ctx, flipY, `▶  FLIP ${flipCardName.toUpperCase()}`, {
+          fill: ctx.confirmFillNum,
+          hover: ctx.confirmHoverNum,
+          stroke: ctx.confirmStrokeNum,
+          text: ctx.confirmTextColor,
+        }, () => ctx.emitResolveEffect({ id: myEffect.id, targetInstanceId: boardTargetId! }), "flip-choice-button");
+      }
+
+      addChoiceButton(ctx, drawY, "DRAW 1 CARD", {
+        fill: 0x0d2010,
+        hover: 0x1a3322,
+        stroke: 0x558866,
+        text: "#86c19a",
+      }, () => {
+        ctx.state.setEffectBoardTargetId(null);
+        ctx.emitResolveEffect({ id: myEffect.id });
+      }, "draw-choice-button");
+    } else if (myEffect.type === "discard_or_delete_self") {
+      const handTargetId = ctx.state.getEffectHandTargetId();
+      const selectedHandCard = handTargetId
+        ? view.hand.find((c) => "instanceId" in c && (c as CardInstance).instanceId === handTargetId)
+        : undefined;
+      const hasHandCards = view.hand.length > 0;
+      const discardY = L.resetY - 18;
+      const deleteY = hasHandCards ? L.resetY + 18 : L.resetY;
+
+      if (!hasHandCards) {
+        addHint(ctx, "Hand is empty. Delete this card to continue.", "#cdb8b8");
+      } else if (!selectedHandCard) {
+        addHint(ctx, "Select a hand card to discard, or delete this card.");
+        addChoiceButton(ctx, discardY, "DISCARD  (select card below)", {
+          fill: 0x18263a,
+          hover: 0x18263a,
+          stroke: 0x3a5570,
+          text: "#6c8ca8",
+        }, null, "discard-choice-button");
+      } else {
+        const discardCardName = "defId" in selectedHandCard
+          ? formatCardDisplayName((selectedHandCard as CardInstance).defId, "Card")
+          : "Card";
+        addHint(ctx, `Discard ${discardCardName}, or delete this card instead.`);
+        addChoiceButton(ctx, discardY, `▶  DISCARD ${discardCardName.toUpperCase()}`, {
+          fill: ctx.confirmFillNum,
+          hover: ctx.confirmHoverNum,
+          stroke: ctx.confirmStrokeNum,
+          text: ctx.confirmTextColor,
+        }, () => ctx.emitResolveEffect({ id: myEffect.id, targetInstanceId: handTargetId! }), "discard-choice-button");
+      }
+
+      addChoiceButton(ctx, deleteY, "DELETE THIS CARD", {
+        fill: 0x3d0a0a,
+        hover: 0x601010,
+        stroke: 0xcc3333,
+        text: "#ff7a7a",
+      }, () => {
+        ctx.state.setEffectHandTargetId(null);
+        ctx.emitResolveEffect({ id: myEffect.id });
+      }, "delete-self-button");
+    } else if (myEffect.type === "give_to_draw" || myEffect.type === "discard_then_opponent_discard") {
+      const handTargetId = ctx.state.getEffectHandTargetId();
+      const selectedHandCard = handTargetId
+        ? view.hand.find((c) => "instanceId" in c && (c as CardInstance).instanceId === handTargetId)
+        : undefined;
+      const hasHandCards = view.hand.length > 0;
+      const primaryLabel = myEffect.type === "give_to_draw" ? "GIVE" : "DISCARD";
+      const primaryY = L.resetY - 18;
+      const skipY = L.resetY + 18;
+
+      if (!hasHandCards) {
+        addHint(ctx, "Hand is empty. Skip to continue.", "#cdb8b8");
+      } else if (!selectedHandCard) {
+        addHint(ctx, `Select a hand card to ${primaryLabel.toLowerCase()}, or skip.`);
+        addChoiceButton(ctx, primaryY, `${primaryLabel}  (select card below)`, {
+          fill: 0x18263a,
+          hover: 0x18263a,
+          stroke: 0x3a5570,
+          text: "#6c8ca8",
+        }, null, "optional-hand-primary-button");
+      } else {
+        const chosenCardName = "defId" in selectedHandCard
+          ? formatCardDisplayName((selectedHandCard as CardInstance).defId, "Card")
+          : "Card";
+        addHint(ctx, `${primaryLabel} ${chosenCardName}, or skip instead.`);
+        addChoiceButton(ctx, primaryY, `▶  ${primaryLabel} ${chosenCardName.toUpperCase()}`, {
+          fill: ctx.confirmFillNum,
+          hover: ctx.confirmHoverNum,
+          stroke: ctx.confirmStrokeNum,
+          text: ctx.confirmTextColor,
+        }, () => {
+          ctx.state.setEffectHandTargetId(null);
+          ctx.emitResolveEffect({ id: myEffect.id, targetInstanceId: handTargetId! });
+        }, "optional-hand-primary-button");
+      }
+
+      addChoiceButton(ctx, skipY, "SKIP", {
+        fill: 0x0d2010,
+        hover: 0x1a3322,
+        stroke: 0x558866,
+        text: "#86c19a",
+      }, () => {
+        ctx.state.setEffectHandTargetId(null);
+        ctx.emitResolveEffect({ id: myEffect.id });
+      }, "optional-hand-skip-button");
     } else if (spec.handPick) {
       const pickLabel = myEffect.type === "exchange_hand"
         ? "Choose 1 card from your hand to give to your opponent ↓"
@@ -217,7 +406,7 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
         const pickIdx = picks.indexOf(proto.protocolId);
         const isPicked = pickIdx !== -1;
         const chipX = L.lineCx[i];
-        const chipY = 590;
+        const chipY = L.resetY - 120;
         const chipBg = scene.add.rectangle(chipX, chipY, 180, 38,
           isPicked ? 0x111111 : protoColor)
           .setStrokeStyle(2, isPicked ? 0x333333 : 0xffffff)
@@ -279,13 +468,13 @@ export function renderEffectResolutionHUD(ctx: EffectResolutionContext): void {
         const pickIdx = picks.indexOf(proto.protocolId);
         const isPicked = pickIdx !== -1;
         const chipX = L.lineCx[i];
-        const chipY = 590;
+        const chipY = L.resetY - 120;
         const chipBg = scene.add.rectangle(chipX, chipY, 180, 38,
           isPicked ? 0x111111 : protoColor)
           .setStrokeStyle(2, isPicked ? 0x333333 : 0xffffff)
           .setAlpha(isPicked ? 0.4 : 1)
           .setName(`rearrange-protocol-chip-${i}`)
-          .setData("testid", `rearrange-protocol-chip-${i}`);
+          .setData("testid", `rearrange-protocol-chip-${i}`);;
         addHud(chipBg);
         const chipLabel = isPicked ? `↳ slot ${pickIdx}` : protoName;
         addHud(scene.add.text(chipX, chipY, chipLabel, {

@@ -57,8 +57,8 @@ export const GENERATED_MAIN_UNIT_2_COMMAND_CARDS: CommandCardDef[] = [
   { id: "clr_4", name: "Clarity", value: 4, protocolId: "proto_clr", effects: [{ trigger: "immediate", type: "reshuffle_trash", description: "Shuffle your trash into your deck.", payload: {} }] },
   { id: "clr_5", name: "Clarity", value: 5, protocolId: "proto_clr", effects: [{ trigger: "immediate", type: "discard", description: "Discard 1 card.", payload: { amount: 1, who: "self" } }] },
   { id: "uni_0", name: "Unity", value: 0, protocolId: "proto_uni", effects: [
-    { trigger: "immediate", type: "ocr_unimplemented", description: "If there is another Unity card in the field, either Flip 1 card or draw 1 card.", payload: {} },
-    { trigger: "passive", type: "ocr_unimplemented", description: "When this card would be covered by a Unity card: First, either Flip 1 card or draw 1 card.", payload: {} },
+    { trigger: "immediate", type: "flip_or_draw", description: "If there is another Unity card in the field, either Flip 1 card or draw 1 card.", payload: { targets: "any_uncovered", protocolId: "proto_uni", minCountInField: 2 } },
+    { trigger: "passive", type: "on_covered_flip_or_draw", description: "When this card would be covered by a Unity card: First, either Flip 1 card or draw 1 card.", payload: { targets: "any_uncovered", coveringProtocolId: "proto_uni" } },
   ] },
   { id: "uni_1", name: "Unity", value: 1, protocolId: "proto_uni", effects: [
     { trigger: "start", type: "ocr_unimplemented", description: "If this card is covered, you may shift this card.", payload: {} },

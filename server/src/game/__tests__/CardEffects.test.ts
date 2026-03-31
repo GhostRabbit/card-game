@@ -262,6 +262,29 @@ describe("enqueueEffectsFromCard", () => {
     expect(state.effectQueue[0].trigger).toBe("start");
   });
 
+  it("does not queue Ice 3 end effect when the source card is uncovered", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards.push({ instanceId: "ice3", defId: "ice_3", face: CardFace.FaceUp });
+
+    enqueueEffectsFromCard(state, 0, "ice_3", "end", "ice3");
+
+    expect(state.effectQueue).toHaveLength(0);
+  });
+
+  it("queues Ice 3 end effect when the source card is covered", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards.push(
+      { instanceId: "ice3", defId: "ice_3", face: CardFace.FaceUp },
+      { instanceId: "top", defId: "dummy", face: CardFace.FaceUp },
+    );
+
+    enqueueEffectsFromCard(state, 0, "ice_3", "end", "ice3");
+
+    expect(state.effectQueue).toHaveLength(1);
+    expect(state.effectQueue[0].type).toBe("shift");
+    expect(state.effectQueue[0].payload).toMatchObject({ targets: "self_if_covered", optional: true });
+  });
+
   it("psy_3 queues a single opponent-owned discard prompt", () => {
     const state = makeState();
     state.players[1].hand.push(card("tmp_opp", CardFace.FaceUp));
@@ -4495,6 +4518,71 @@ describe("executeEffect — discard_or_delete_self (cor_6)", () => {
 
     expect(state.players[0].lines[0].cards).toHaveLength(0);
     expect(state.trashes[0].some((c) => c.instanceId === "src")).toBe(true);
+  });
+});
+
+describe("executeEffect — flip_or_draw (uni_0)", () => {
+  it("draws 1 when no target is chosen and another Unity card is in the field", () => {
+    const state = makeState();
+    state.decks[0].push(card("d1"));
+    state.players[0].deckSize = 1;
+    state.players[0].lines[0].cards = [{ instanceId: "src", defId: "uni_0", face: CardFace.FaceUp as CardFace }];
+    state.players[1].lines[1].cards = [{ instanceId: "other-unity", defId: "uni_2", face: CardFace.FaceUp as CardFace }];
+
+    executeEffect(state, effect("flip_or_draw", 0, { targets: "any_uncovered", protocolId: "proto_uni", minCountInField: 2 }, "src"));
+
+    expect(state.players[0].hand).toHaveLength(1);
+    expect(state.players[0].hand[0].instanceId).toBe("d1");
+  });
+
+  it("flips the chosen uncovered card when a target is chosen", () => {
+    const state = makeState();
+    state.players[0].lines[0].cards = [
+      { instanceId: "src", defId: "uni_0", face: CardFace.FaceUp as CardFace },
+      { instanceId: "target", defId: "spd_1", face: CardFace.FaceUp as CardFace },
+    ];
+    state.players[1].lines[1].cards = [{ instanceId: "other-unity", defId: "uni_2", face: CardFace.FaceUp as CardFace }];
+
+    executeEffect(state, effect("flip_or_draw", 0, { targets: "any_uncovered", protocolId: "proto_uni", minCountInField: 2, targetInstanceId: "target" }, "src"));
+
+    expect(state.players[0].lines[0].cards[1].face).toBe(CardFace.FaceDown);
+  });
+
+  it("skips when there is no other Unity card in the field", () => {
+    const state = makeState();
+    state.decks[0].push(card("d1"));
+    state.players[0].deckSize = 1;
+    state.players[0].lines[0].cards = [{ instanceId: "src", defId: "uni_0", face: CardFace.FaceUp as CardFace }];
+
+    executeEffect(state, effect("flip_or_draw", 0, { targets: "any_uncovered", protocolId: "proto_uni", minCountInField: 2 }, "src"));
+
+    expect(state.players[0].hand).toHaveLength(0);
+    expect(state.pendingLogs.some((l) => l.includes("flip_or_draw: skipped"))).toBe(true);
+  });
+});
+
+describe("enqueueEffectsOnCover — on_covered_flip_or_draw (uni_0)", () => {
+  it("queues flip_or_draw when uni_0 is covered by another Unity card", () => {
+    const state = makeState();
+    const uni0: CardInstance = { instanceId: "uni0", defId: "uni_0", face: CardFace.FaceUp };
+    const cover: CardInstance = { instanceId: "cover", defId: "uni_2", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards = [uni0, cover];
+
+    enqueueEffectsOnCover(state, uni0, 0);
+
+    expect(state.effectQueue).toHaveLength(1);
+    expect(state.effectQueue[0].type).toBe("flip_or_draw");
+  });
+
+  it("does not queue flip_or_draw when uni_0 is covered by a non-Unity card", () => {
+    const state = makeState();
+    const uni0: CardInstance = { instanceId: "uni0", defId: "uni_0", face: CardFace.FaceUp };
+    const cover: CardInstance = { instanceId: "cover", defId: "spd_3", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards = [uni0, cover];
+
+    enqueueEffectsOnCover(state, uni0, 0);
+
+    expect(state.effectQueue).toHaveLength(0);
   });
 });
 

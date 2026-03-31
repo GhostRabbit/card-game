@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { getSocket } from "../network/SocketClient";
-import { DraftVariant, LobbySettings, ProtocolSet } from "@compile/shared";
+import { DraftVariant, FirstPlayerChoice, LobbySettings, ProtocolSet } from "@compile/shared";
 import { createMockView } from "../data/mockGameState";
 
 export class MenuScene extends Phaser.Scene {
@@ -20,6 +20,7 @@ export class MenuScene extends Phaser.Scene {
       ProtocolSet.Aux2,
     ]);
     let selectedVariant: DraftVariant = DraftVariant.Limited9;
+    let firstPlayerChoice: FirstPlayerChoice = FirstPlayerChoice.Random;
 
     const theme = {
       bgTop: 0x060912,
@@ -35,21 +36,34 @@ export class MenuScene extends Phaser.Scene {
       inputStrokeActive: 0x39f0c9,
     };
 
+    const panelW = Math.min(860, Math.max(740, Math.round(width * 0.74)));
+    const panelH = Math.min(660, Math.max(560, Math.round(height * 0.8)));
+    const panelCx = width / 2;
+    const panelCy = Math.round(height * 0.53);
+    const panelTop = panelCy - panelH / 2;
+    const rowStartY = panelTop + 122;
+
     const login = {
-      panelCx: width / 2,
-      panelCy: Math.round(height * 0.37),
-      panelW: 760,
-      panelH: 300,
-      titleY: Math.round(height * 0.10),
-      subtitleY: Math.round(height * 0.17),
-      statusY: Math.round(height * 0.25),
-      userY: Math.round(height * 0.33),
-      codeY: Math.round(height * 0.42),
-      buttonY: Math.round(height * 0.52),
-      labelX: width / 2 - 205,
-      inputX: width / 2 + 70,
-      inputW: 360,
+      panelCx,
+      panelCy,
+      panelW,
+      panelH,
+      titleY: Math.max(58, panelTop - 34),
+      subtitleY: Math.max(96, panelTop - 4),
+      statusY: panelTop + 74,
+      userY: rowStartY,
+      firstPlayerHeaderY: rowStartY + 56,
+      firstPlayerY: rowStartY + 86,
+      setHeaderY: rowStartY + 142,
+      setY: rowStartY + 172,
+      variantHeaderY: rowStartY + 226,
+      variantY0: rowStartY + 260,
+      roomY: panelCy + panelH / 2 - 52,
+      labelX: panelCx - 250,
+      inputX: panelCx + 65,
+      inputW: 390,
       inputH: 44,
+      innerW: panelW - 72,
     };
 
     const currentLobbySettings = (): LobbySettings => ({
@@ -60,6 +74,7 @@ export class MenuScene extends Phaser.Scene {
         ProtocolSet.Aux2,
       ].filter((setId) => selectedSets.has(setId)),
       draftVariant: selectedVariant,
+      firstPlayerChoice,
     });
 
     // Atmospheric background + login panel
@@ -74,6 +89,16 @@ export class MenuScene extends Phaser.Scene {
       .setStrokeStyle(1, 0x2a7a8f);
     this.add.rectangle(login.panelCx - login.panelW / 2 + 4, login.panelCy, 4, login.panelH - 8, theme.accentPrimary, 0.9);
     this.add.rectangle(login.panelCx + login.panelW / 2 - 4, login.panelCy, 4, login.panelH - 8, theme.accentSecondary, 0.9);
+    this.add.rectangle(login.panelCx, login.statusY + 48, login.innerW, 66, 0x12263b, 0.6)
+      .setStrokeStyle(1, 0x2e516f);
+    this.add.rectangle(login.panelCx, login.firstPlayerY + 18, login.innerW, 124, 0x112032, 0.55)
+      .setStrokeStyle(1, 0x2a4760);
+    this.add.rectangle(login.panelCx, login.setY + 14, login.innerW, 98, 0x102336, 0.5)
+      .setStrokeStyle(1, 0x29415a);
+    this.add.rectangle(login.panelCx, login.variantY0 + 36, login.innerW, 128, 0x0f1f31, 0.55)
+      .setStrokeStyle(1, 0x273d56);
+    this.add.rectangle(login.panelCx, login.roomY, login.innerW, 66, 0x13263b, 0.65)
+      .setStrokeStyle(1, 0x2f5f80);
     loginPanel.setAlpha(0.95);
 
     this.add.text(width / 2, login.titleY, "COMPILE", {
@@ -89,10 +114,10 @@ export class MenuScene extends Phaser.Scene {
       fontFamily: "monospace",
       color: "#95b7d8",
       fontStyle: "bold",
-    }).setOrigin(0.5).setY(login.subtitleY + 20);
+    }).setOrigin(0.5);
 
     // Username
-    this.add.text(login.labelX, login.userY, "USERNAME", {
+    this.add.text(login.labelX, login.userY, "PILOT NAME", {
       fontSize: "14px", fontFamily: "monospace", color: theme.textMain, fontStyle: "bold",
     }).setOrigin(0.5);
     const usernameBox = this.add.rectangle(login.inputX, login.userY, login.inputW, login.inputH, theme.inputBg)
@@ -108,14 +133,14 @@ export class MenuScene extends Phaser.Scene {
     }
 
     // Room Code (for joining)
-    this.add.text(login.labelX, login.codeY, "ROOM CODE", {
-      fontSize: "14px", fontFamily: "monospace", color: theme.textMain, fontStyle: "bold",
-    }).setOrigin(0.5);
-    const codeBox = this.add.rectangle(login.inputX, login.codeY, login.inputW, login.inputH, theme.inputBg)
+    const codeBox = this.add.rectangle(login.panelCx, login.roomY, 230, login.inputH, theme.inputBg)
       .setStrokeStyle(2, theme.inputStrokeIdle);
-    const codeText = this.add.text(login.inputX, login.codeY, "", {
+    const codeText = this.add.text(login.panelCx, login.roomY, "", {
       fontSize: "18px", fontFamily: "monospace", color: "#ffe3a0", fontStyle: "bold",
     }).setOrigin(0.5);
+    this.add.text(login.panelCx, login.roomY - 36, "ROOM CODE", {
+      fontSize: "14px", fontFamily: "monospace", color: theme.textMain, fontStyle: "bold",
+    }).setOrigin(0.5).setDepth(5);
     let roomInput = "";
     let activeInput: "username" | "code" = "username";
 
@@ -175,7 +200,7 @@ export class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Copy button for room code — positioned to the right of code textfield
-    const copyCodeBtn = this.add.text(width / 2 + 210, login.codeY, "⧉", {
+    const copyCodeBtn = this.add.text(login.panelCx + 140, login.roomY, "⧉", {
       fontSize: "20px", fontFamily: "monospace", color: "#c3fff1",
       backgroundColor: "#163044", padding: { x: 7, y: 5 },
     }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
@@ -190,7 +215,7 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Protocol set selector
-    this.add.text(width / 2, height * 0.64 - 12, "AVAILABLE PROTOCOL SETS", {
+    this.add.text(width / 2, login.setHeaderY, "AVAILABLE PROTOCOLS", {
       fontSize: "12px", fontFamily: "monospace", color: theme.textMuted,
     }).setOrigin(0.5);
     const setItems: { setId: ProtocolSet; label: string }[] = [
@@ -216,10 +241,10 @@ export class MenuScene extends Phaser.Scene {
 
     setItems.forEach(({ setId, label }, i) => {
       const x = setStartX + i * (setW + setGap);
-      const box = this.add.rectangle(x, height * 0.68, setW, setH, 0x0a1520)
+      const box = this.add.rectangle(x, login.setY, setW, setH, 0x0a1520)
         .setStrokeStyle(1, 0x223344)
         .setInteractive({ useHandCursor: true });
-      const txt = this.add.text(x, height * 0.68, label, {
+      const txt = this.add.text(x, login.setY, label, {
         fontSize: "11px", fontFamily: "monospace", color: "#445566",
       }).setOrigin(0.5);
 
@@ -249,7 +274,7 @@ export class MenuScene extends Phaser.Scene {
     refreshSetButtons();
 
     // Draft variant selector
-    this.add.text(width / 2, height * 0.75 - 12, "DRAFT VARIANT", {
+    this.add.text(width / 2, login.variantHeaderY, "DRAFT VARIANT", {
       fontSize: "12px", fontFamily: "monospace", color: theme.textMuted,
     }).setOrigin(0.5);
     const variantItems: { variant: DraftVariant; label: string; desc: string }[] = [
@@ -259,10 +284,20 @@ export class MenuScene extends Phaser.Scene {
     ];
     const variantBoxes: Phaser.GameObjects.Rectangle[] = [];
     const variantLabels: Phaser.GameObjects.Text[] = [];
-    const variantDescs: Phaser.GameObjects.Text[] = [];
     let draftVariantLocked = false;
-    const variantY0 = height * 0.79;
-    const variantGapY = 0.07;
+    const variantButtonY = login.variantY0;
+
+    const variantDescLabel = this.add.text(width / 2, login.variantY0 + 34, "VARIANT DETAILS", {
+      fontSize: "10px", fontFamily: "monospace", color: "#6d8ba4", fontStyle: "bold",
+    }).setOrigin(0.5);
+
+    const getVariantDesc = (variant: DraftVariant): string =>
+      variantItems.find((item) => item.variant === variant)?.desc ?? "";
+
+    const variantDescText = this.add.text(width / 2, login.variantY0 + 54, getVariantDesc(selectedVariant), {
+      fontSize: "11px", fontFamily: "monospace", color: "#9fd9ff", align: "center",
+      wordWrap: { width: 620 },
+    }).setOrigin(0.5);
 
     const refreshVariantButtons = () => {
       variantItems.forEach(({ variant }, i) => {
@@ -271,24 +306,30 @@ export class MenuScene extends Phaser.Scene {
           .setStrokeStyle(1, selected ? 0x33bbff : 0x223344)
           .setAlpha(draftVariantLocked ? 0.55 : 1);
         variantLabels[i].setColor(selected ? "#33bbff" : "#557799");
-        variantDescs[i].setColor(selected ? "#9fd9ff" : "#446077");
       });
+      variantDescText.setText(getVariantDesc(selectedVariant));
+      variantDescText.setColor("#9fd9ff");
     };
 
+    const variantW = 196;
+    const variantH = 36;
+    const variantGap = 16;
+    const variantTotalW = variantItems.length * variantW + (variantItems.length - 1) * variantGap;
+    const variantStartX = width / 2 - variantTotalW / 2 + variantW / 2;
+
     variantItems.forEach(({ variant, label, desc }, i) => {
-      const y = variantY0 + i * (height * variantGapY);
-      const box = this.add.rectangle(width / 2, y, 560, 44, 0x0a1520)
+      const x = variantStartX + i * (variantW + variantGap);
+      const box = this.add.rectangle(x, variantButtonY, variantW, variantH, 0x0a1520)
         .setStrokeStyle(1, 0x223344)
         .setInteractive({ useHandCursor: true });
-      const title = this.add.text(width / 2 - 250, y - 10, label, {
+      const title = this.add.text(x, variantButtonY, label, {
         fontSize: "13px", fontFamily: "monospace", color: "#557799", fontStyle: "bold",
-      }).setOrigin(0, 0.5);
-      const detail = this.add.text(width / 2 - 250, y + 10, desc, {
-        fontSize: "10px", fontFamily: "monospace", color: "#446077",
-      }).setOrigin(0, 0.5);
+      }).setOrigin(0.5);
 
       box.on("pointerover", () => {
         if (!draftVariantLocked) box.setStrokeStyle(1, 0x4488aa);
+        variantDescText.setText(desc);
+        variantDescText.setColor("#c7ecff");
       });
       box.on("pointerout", () => refreshVariantButtons());
       box.on("pointerdown", () => {
@@ -302,22 +343,70 @@ export class MenuScene extends Phaser.Scene {
 
       variantBoxes.push(box);
       variantLabels.push(title);
-      variantDescs.push(detail);
     });
     refreshVariantButtons();
 
-    // Buttons
-    const btnStyle = { fontSize: "18px", fontFamily: "monospace", color: "#041114", fontStyle: "bold" };
+    // First player selector
+    this.add.text(width / 2, login.firstPlayerHeaderY, "FIRST PLAYER", {
+      fontSize: "12px", fontFamily: "monospace", color: theme.textMuted,
+    }).setOrigin(0.5);
 
-    const createBtn = this.add.rectangle(width / 2 - 110, login.buttonY, 200, 48, 0x26d7af)
+    const firstPlayerItems: Array<{ value: FirstPlayerChoice; label: string }> = [
+      { value: FirstPlayerChoice.Me, label: "Me" },
+      { value: FirstPlayerChoice.Opponent, label: "Opponent" },
+      { value: FirstPlayerChoice.Random, label: "Random" },
+    ];
+    const firstPlayerBoxes: Phaser.GameObjects.Rectangle[] = [];
+    const firstPlayerLabels: Phaser.GameObjects.Text[] = [];
+    const fpW = 160;
+    const fpH = 28;
+    const fpGap = 10;
+    const fpTotal = firstPlayerItems.length * fpW + (firstPlayerItems.length - 1) * fpGap;
+    const fpStartX = width / 2 - fpTotal / 2 + fpW / 2;
+    const fpY = login.firstPlayerY;
+
+    const refreshFirstPlayerButtons = () => {
+      firstPlayerItems.forEach(({ value }, i) => {
+        const selected = firstPlayerChoice === value;
+        firstPlayerBoxes[i].setFillStyle(selected ? 0x2f1f00 : 0x0a1520)
+          .setStrokeStyle(1, selected ? 0xffc45a : 0x223344);
+        firstPlayerLabels[i].setColor(selected ? "#ffd892" : "#557799");
+      });
+    };
+
+    firstPlayerItems.forEach(({ value, label }, i) => {
+      const x = fpStartX + i * (fpW + fpGap);
+      const box = this.add.rectangle(x, fpY, fpW, fpH, 0x0a1520)
+        .setStrokeStyle(1, 0x223344)
+        .setInteractive({ useHandCursor: true });
+      const txt = this.add.text(x, fpY, label, {
+        fontSize: "11px", fontFamily: "monospace", color: "#557799", fontStyle: "bold",
+      }).setOrigin(0.5);
+
+      box.on("pointerover", () => box.setStrokeStyle(1, 0x4488aa));
+      box.on("pointerout", () => refreshFirstPlayerButtons());
+      box.on("pointerdown", () => {
+        firstPlayerChoice = value;
+        refreshFirstPlayerButtons();
+      });
+
+      firstPlayerBoxes.push(box);
+      firstPlayerLabels.push(txt);
+    });
+    refreshFirstPlayerButtons();
+
+    // Buttons
+    const btnStyle = { fontSize: "16px", fontFamily: "monospace", color: "#041114", fontStyle: "bold" };
+
+    const createBtn = this.add.rectangle(width / 2 - 250, login.roomY, 170, 44, 0x26d7af)
       .setInteractive({ useHandCursor: true });
     createBtn.setStrokeStyle(2, 0x8fffe7);
-    this.add.text(width / 2 - 110, login.buttonY, "CREATE ROOM", btnStyle).setOrigin(0.5);
+    this.add.text(width / 2 - 250, login.roomY, "CREATE", btnStyle).setOrigin(0.5);
 
-    const joinBtn = this.add.rectangle(width / 2 + 110, login.buttonY, 200, 48, 0x49a8ff)
+    const joinBtn = this.add.rectangle(width / 2 + 250, login.roomY, 170, 44, 0x49a8ff)
       .setInteractive({ useHandCursor: true });
     joinBtn.setStrokeStyle(2, 0x9fd2ff);
-    this.add.text(width / 2 + 110, login.buttonY, "JOIN ROOM", btnStyle).setOrigin(0.5);
+    this.add.text(width / 2 + 250, login.roomY, "JOIN", btnStyle).setOrigin(0.5);
 
     createBtn.on("pointerover", () => createBtn.setFillStyle(0x36e9c1));
     createBtn.on("pointerout", () => createBtn.setFillStyle(0x26d7af));
@@ -328,8 +417,19 @@ export class MenuScene extends Phaser.Scene {
       if (!username.trim()) { statusText.setText("Enter a username first."); return; }
       socket.emit("create_room", { username: username.trim(), lobbySettings: currentLobbySettings() });
     });
-    joinBtn.on("pointerdown", () => {
+    joinBtn.on("pointerdown", async () => {
       if (!username.trim()) { statusText.setText("Enter a username first."); return; }
+      if (roomInput.length === 0) {
+        try {
+          const clip = (await navigator.clipboard.readText()).trim().toUpperCase();
+          if (/^[A-Z0-9]{6}$/.test(clip)) {
+            roomInput = clip;
+            codeText.setText(roomInput);
+          }
+        } catch {
+          // Clipboard access can fail if permissions are denied; ignore and continue.
+        }
+      }
       if (roomInput.length !== 6) { statusText.setText("Room code must be 6 characters."); return; }
       socket.emit("join_room", { username: username.trim(), roomCode: roomInput });
     });

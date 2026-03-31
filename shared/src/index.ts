@@ -41,9 +41,16 @@ export enum DraftVariant {
   Random3 = "Random3",
 }
 
+export enum FirstPlayerChoice {
+  Me = "Me",
+  Opponent = "Opponent",
+  Random = "Random",
+}
+
 export interface LobbySettings {
   selectedProtocolSets: ProtocolSet[];
   draftVariant: DraftVariant;
+  firstPlayerChoice: FirstPlayerChoice;
 }
 
 // ─── Card & Protocol Data ─────────────────────────────────────────────────────

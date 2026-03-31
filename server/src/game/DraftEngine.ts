@@ -6,6 +6,7 @@ import {
   CardInstance,
   CardFace,
   DraftVariant,
+  FirstPlayerChoice,
   LobbySettings,
   ProtocolSet,
 } from "@compile/shared";
@@ -26,6 +27,7 @@ export const DEFAULT_LOBBY_SETTINGS: LobbySettings = {
     ProtocolSet.Aux2,
   ],
   draftVariant: DraftVariant.Limited9,
+  firstPlayerChoice: FirstPlayerChoice.Random,
 };
 
 export function shuffle<T>(arr: T[]): T[] {
@@ -55,6 +57,7 @@ export function normalizeLobbySettings(input?: LobbySettings): LobbySettings {
       ProtocolSet.Aux2,
     ].filter((s) => selected.has(s)),
     draftVariant: input?.draftVariant ?? DEFAULT_LOBBY_SETTINGS.draftVariant,
+    firstPlayerChoice: input?.firstPlayerChoice ?? DEFAULT_LOBBY_SETTINGS.firstPlayerChoice,
   };
 }
 

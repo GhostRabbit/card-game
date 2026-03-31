@@ -11,6 +11,7 @@ export interface FocusPanelLayout {
   focusPanelCx: number;
   focusPanelW: number;
   H: number;
+  focusCardY?: number;
 }
 
 function addToFocusPanel(
@@ -46,11 +47,11 @@ export function renderFocusTurnState(
     END: "End-of-turn effects resolve, then turn passes.",
   };
 
-  addToFocusPanel(scene, group, scene.add.text(cx, H / 2 - 80, state, {
+  addToFocusPanel(scene, group, scene.add.text(cx, 75, state, {
     fontSize: "28px", fontFamily: "monospace", fontStyle: "bold", color: "#def5ff",
   }).setOrigin(0.5));
 
-  addToFocusPanel(scene, group, scene.add.text(cx, H / 2 - 10, summaries[state], {
+  addToFocusPanel(scene, group, scene.add.text(cx, 108, summaries[state], {
     fontSize: "13px",
     fontFamily: "monospace",
     color: "#d3e4f1",
@@ -78,7 +79,7 @@ export function renderFocusControlToken(
   const controlOwner = hasControl ? "You" : opponentHasControl ? "Opponent" : "Neutral";
 
   const tokenSize = 150;
-  const tokenCy = H / 2 - 70;
+  const tokenCy = 130;
   addToFocusPanel(scene, group, scene.add.rectangle(cx, tokenCy, tokenSize, tokenSize, tokenActive ? 0xd4a52b : 0x6f6030)
     .setStrokeStyle(3, tokenActive ? 0xf0cd68 : 0x8a7b4a));
   addToFocusPanel(scene, group, scene.add.circle(cx, tokenCy, 44, 0x101010)
@@ -138,7 +139,7 @@ export function renderFocusProtocol(
   const panelRight = cx + pw / 2;
   const cardW = Math.floor((pw - 8) * 0.33);
   const cardH = cardW;
-  const cardCy = H / 2;
+  const cardCy = 130;
   const cardTop = cardCy - cardH / 2;
   const cardBottom = cardCy + cardH / 2;
 
@@ -215,6 +216,7 @@ export function renderFocusCardPanel(
   card: CardView | null,
 ): void {
   const { focusPanelCx: cx, focusPanelW: pw, H } = layout;
+  const focusCardY = layout.focusCardY ?? 130;
 
   addToFocusPanel(scene, group,
     scene.add.rectangle(cx, H / 2, pw, H, 0x112338).setStrokeStyle(1.5, 0x426a8b));
@@ -225,12 +227,12 @@ export function renderFocusCardPanel(
   if (!card) {
     const revealedCard = view?.opponentRevealedHandCard ?? null;
     if (revealedCard) {
-      addToFocusPanel(scene, group, scene.add.text(cx, H / 2 - 155, "OPP REVEALED", {
+      addToFocusPanel(scene, group, scene.add.text(cx, 25, "OPP REVEALED", {
         fontSize: "11px", fontFamily: "monospace", color: "#ffaa44", fontStyle: "bold",
       }).setOrigin(0.5));
-      buildFocusCard(scene, group, cx, H / 2, revealedCard, 200, 280, false);
+      buildFocusCard(scene, group, cx, focusCardY, revealedCard, 200, 200, false);
     } else {
-      addToFocusPanel(scene, group, scene.add.text(cx, H / 2, "hover a card\nto inspect", {
+      addToFocusPanel(scene, group, scene.add.text(cx, 130, "hover a card\nto inspect", {
         fontSize: "12px", fontFamily: "monospace", color: "#8fb5d3", align: "center",
       }).setOrigin(0.5));
     }
@@ -238,7 +240,7 @@ export function renderFocusCardPanel(
   }
 
   const focusedCovered = isFocusedCardCovered(view, card);
-  buildFocusCard(scene, group, cx, H / 2, card, 200, 280, focusedCovered);
+  buildFocusCard(scene, group, cx, focusCardY, card, 200, 200, focusedCovered);
 }
 
 function isFocusedCardCovered(view: PlayerView, card: CardView): boolean {

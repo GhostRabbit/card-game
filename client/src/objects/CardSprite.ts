@@ -23,6 +23,7 @@ export class CardSprite extends Phaser.GameObjects.Container {
   private readonly cardH: number;
   private readonly uiScale: number;
   private effectPulseTween: Phaser.Tweens.Tween | null = null;
+  private selectTargetTween: Phaser.Tweens.Tween | null = null;
 
   private px(base: number, min = 1): number {
     return Math.max(min, Math.round(base * this.uiScale));
@@ -430,6 +431,20 @@ export class CardSprite extends Phaser.GameObjects.Container {
     this.bg.on("pointerover",  () => { this.bg.setFillStyle(this.fillHover); this.bg.setStrokeStyle(2.5, 0x00ffcc); });
     this.bg.on("pointerout",   () => { this.bg.setFillStyle(this.fillNormal); this.bg.setStrokeStyle(2, 0x00ffcc); });
     this.bg.on("pointerdown",  () => onClick(this.cardData));
+
+    // Flashing border overlay — fast pulse to draw attention
+    const flashGfx = this.scene.add.graphics();
+    flashGfx.lineStyle(3, 0x00ffcc, 1);
+    flashGfx.strokeRect(-this.cardW / 2, -this.cardH / 2, this.cardW, this.cardH);
+    this.add(flashGfx);
+    this.selectTargetTween = this.scene.tweens.add({
+      targets: flashGfx,
+      alpha: 0,
+      duration: 300,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.InOut",
+    });
   }
 
   /**
@@ -484,6 +499,10 @@ export class CardSprite extends Phaser.GameObjects.Container {
     if (this.effectPulseTween) {
       this.effectPulseTween.stop();
       this.effectPulseTween = null;
+    }
+    if (this.selectTargetTween) {
+      this.selectTargetTween.stop();
+      this.selectTargetTween = null;
     }
     super.destroy(fromScene);
   }

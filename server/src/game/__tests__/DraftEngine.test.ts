@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { DraftVariant, ProtocolSet } from "@compile/shared";
+import { DraftVariant, FirstPlayerChoice, ProtocolSet } from "@compile/shared";
 import { PROTOCOLS } from "../../data/cards";
-import { createInitialDraftState, createRandomThreeDraftState } from "../DraftEngine";
+import { createInitialDraftState, createRandomThreeDraftState, normalizeLobbySettings } from "../DraftEngine";
 
 describe("DraftEngine protocol-set metadata", () => {
   it("uses ProtocolDef.set metadata for initial draft filtering", () => {
     const state = createInitialDraftState({
       selectedProtocolSets: [ProtocolSet.MainUnit1],
       draftVariant: DraftVariant.Full,
+      firstPlayerChoice: FirstPlayerChoice.Me,
     });
 
     const mainUnit1Protocols = PROTOCOLS.filter((p) => p.set === ProtocolSet.MainUnit1);
@@ -20,6 +21,7 @@ describe("DraftEngine protocol-set metadata", () => {
     const state = createInitialDraftState({
       selectedProtocolSets: [ProtocolSet.MainUnit2],
       draftVariant: DraftVariant.Full,
+      firstPlayerChoice: FirstPlayerChoice.Opponent,
     });
 
     const mainUnit2Protocols = PROTOCOLS.filter((p) => p.set === ProtocolSet.MainUnit2);
@@ -32,6 +34,7 @@ describe("DraftEngine protocol-set metadata", () => {
     const result = createRandomThreeDraftState({
       selectedProtocolSets: [ProtocolSet.MainUnit2],
       draftVariant: DraftVariant.Random3,
+      firstPlayerChoice: FirstPlayerChoice.Random,
     });
 
     expect("error" in result).toBe(false);
@@ -43,5 +46,11 @@ describe("DraftEngine protocol-set metadata", () => {
       const protocol = PROTOCOLS.find((candidate) => candidate.id === pick.protocolId);
       return protocol?.set === ProtocolSet.MainUnit2;
     })).toBe(true);
+  });
+
+  it("defaults firstPlayerChoice to Random when missing", () => {
+    const normalized = normalizeLobbySettings();
+
+    expect(normalized.firstPlayerChoice).toBe(FirstPlayerChoice.Random);
   });
 });

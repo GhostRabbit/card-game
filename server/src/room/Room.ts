@@ -6,6 +6,7 @@ import {
   ProtocolStatus,
   LobbySettings,
   DraftVariant,
+  FirstPlayerChoice,
 } from "@compile/shared";
 import {
   createInitialDraftState,
@@ -183,8 +184,18 @@ export class Room {
     }) as [import("@compile/shared").PlayerState, import("@compile/shared").PlayerState];
 
     this.gameState = createServerGameState(playerStates, decks);
+    const firstPlayer = draftState.lobbySettings.firstPlayerChoice;
+    this.gameState.activePlayerIndex =
+      firstPlayer === FirstPlayerChoice.Me
+        ? 0
+        : firstPlayer === FirstPlayerChoice.Opponent
+          ? 1
+          : (Math.random() < 0.5 ? 0 : 1);
     processAutoPhases(this.gameState);
-    this.logger?.log("TURN", `Turn 1 — active: P0 (${this.players[0]?.username})`);
+    this.logger?.log(
+      "TURN",
+      `Turn 1 — active: P${this.gameState.activePlayerIndex} (${this.players[this.gameState.activePlayerIndex]?.username})`,
+    );
     this.broadcastStartTurnPhases(this.gameState);
   }
 

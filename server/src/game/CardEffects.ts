@@ -29,6 +29,13 @@ export function enqueueEffectsFromCard(
   for (const effect of def.effects) {
     if (effect.trigger !== trigger) continue;
     if (effect.type === "passive") continue;
+    if (sourceInstanceId) {
+      const requiresCoveredSource = effect.type === "delete_self_if_covered"
+        || (effect.type === "shift" && effect.payload?.targets === "self_if_covered");
+      if (requiresCoveredSource && !isCardCovered(state, sourceInstanceId)) {
+        continue;
+      }
+    }
 
     enqueueResolvedPendingEffect(
       state,
@@ -192,6 +199,15 @@ export function enqueueEffectsOnCover(
   if (coveredCard.face !== CardFace.FaceUp) return;
   const def = CARD_MAP.get(coveredCard.defId);
   if (!def) return;
+  let coveringCard: CardInstance | null = null;
+
+  for (const line of state.players[ownerIndex].lines) {
+    const coveredIdx = line.cards.findIndex((card) => card.instanceId === coveredCard.instanceId);
+    if (coveredIdx !== -1 && coveredIdx < line.cards.length - 1) {
+      coveringCard = line.cards[coveredIdx + 1];
+      break;
+    }
+  }
 
   for (const effect of def.effects) {
     if (effect.trigger !== "passive") continue;
@@ -240,6 +256,21 @@ export function enqueueEffectsOnCover(
           type: "draw", description: effect.description,
           ownerIndex, trigger: "immediate",
           payload: { amount: (effect.payload?.amount as number) ?? 1 },
+          sourceInstanceId: coveredCard.instanceId,
+        });
+        break;
+      }
+      case "on_covered_flip_or_draw": {
+        const coveringProtocolId = effect.payload?.coveringProtocolId as string | undefined;
+        const coveringDef = coveringCard ? CARD_MAP.get(coveringCard.defId) : null;
+        if (coveringProtocolId && coveringDef?.protocolId !== coveringProtocolId) {
+          break;
+        }
+        state.effectQueue.push({
+          id: uuidv4(), cardDefId: coveredCard.defId, cardName: def.name,
+          type: "flip_or_draw", description: effect.description,
+          ownerIndex, trigger: "immediate",
+          payload: { ...(effect.payload ?? {}) },
           sourceInstanceId: coveredCard.instanceId,
         });
         break;
