@@ -26,9 +26,24 @@ export function enqueueEffectsFromCard(
   const def = CARD_MAP.get(cardDefId);
   if (!def) return;
 
+  const ignoreMid = sourceInstanceId 
+    ? isMidCommandsIgnored(state, findSourceLineIndex(state, ownerIndex, sourceInstanceId))
+    : false;
+
+  let activeIndex = 0;
   for (const effect of def.effects) {
-    if (effect.trigger !== trigger) continue;
     if (effect.type === "passive") continue;
+
+    const isMiddleCommand = activeIndex === 1;
+    activeIndex++;
+
+    if (effect.trigger !== trigger) continue;
+    
+    if (ignoreMid && isMiddleCommand) {
+      state.pendingLogs.push(`  ignore_mid_commands: suppressed ${effect.type} for ${def.id}`);
+      continue;
+    }
+
     if (sourceInstanceId) {
       const requiresCoveredSource = effect.type === "delete_self_if_covered"
         || (effect.type === "shift" && effect.payload?.targets === "self_if_covered");
@@ -115,6 +130,21 @@ export function isCardCovered(state: ServerGameState, instanceId: string): boole
   return false;
 }
 
+export function isMidCommandsIgnored(state: ServerGameState, lineIndex: number): boolean {
+  if (lineIndex < 0 || lineIndex > 2) return false;
+  for (const pi of [0, 1] as const) {
+    for (const card of state.players[pi].lines[lineIndex].cards) {
+      if (card.face === CardFace.FaceUp) {
+        const def = CARD_MAP.get(card.defId);
+        if (def && def.effects.some(e => e.trigger === "passive" && e.type === "ignore_mid_commands")) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * When a card is flipped face-up, enqueue its immediate effects.
  *
@@ -136,7 +166,10 @@ export function enqueueEffectsOnFlipFaceUp(
   const isCovered = isCardCovered(state, flippedCard.instanceId);
   const immediates = def.effects.filter((e) => e.trigger === "immediate");
 
-  const toQueue = isCovered ? immediates.slice(0, 1) : immediates;
+  const lineIndex = findSourceLineIndex(state, ownerIndex, flippedCard.instanceId);
+  const ignoreMid = isMidCommandsIgnored(state, lineIndex);
+
+  const toQueue = (isCovered || ignoreMid) ? immediates.slice(0, 1) : immediates;
 
   for (const eff of toQueue) {
     enqueueResolvedPendingEffect(
@@ -168,6 +201,12 @@ export function enqueueEffectsOnUncover(
 ): void {
   const def = CARD_MAP.get(uncoveredCard.defId);
   if (!def) return;
+
+  const lineIndex = findSourceLineIndex(state, ownerIndex, uncoveredCard.instanceId);
+  if (isMidCommandsIgnored(state, lineIndex)) {
+    state.pendingLogs.push(`  ignore_mid_commands: suppressed uncover effects for ${def.id}`);
+    return;
+  }
 
   const immediates = def.effects.filter((e) => e.trigger === "immediate");
   // Skip index 0 — that fired on play/flip. Queue everything after.

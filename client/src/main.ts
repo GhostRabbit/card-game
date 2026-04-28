@@ -18,6 +18,9 @@ const config: Phaser.Types.Core.GameConfig = {
     width: 1600,
     height: 720,
   },
+  dom: {
+    createContainer: true,
+  },
   scene: [MenuScene, DraftScene, GameScene, MockGameScene, CardPreviewScene, GameOverScene],
 };
 

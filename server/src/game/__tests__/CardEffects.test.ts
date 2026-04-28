@@ -4771,3 +4771,41 @@ describe("executeEffect — shift (opponent_in_source_line)", () => {
     expect(state.players[1].lines[0].cards.some((c) => c.instanceId === "opp1")).toBe(true);
   });
 });
+
+// ─── ignore_mid_commands passive hook ────────────────────────────────────────
+
+describe("ignore_mid_commands passive hook", () => {
+  it("ignores the second executable effect on a card when played face-up", () => {
+    const state = makeState();
+    // apy_2 provides the passive (face-up in line 0)
+    state.players[0].lines[0].cards = [{ instanceId: "apy2", defId: "apy_2", face: CardFace.FaceUp }];
+    
+    // play drk_0 (draw 3, shift opp covered) into the same line
+    // since it's played face-up uncovered, it would normally queue both.
+    // with ignore_mid_commands, it should only queue the first (draw).
+    const drk0: CardInstance = { instanceId: "drk0", defId: "drk_0", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards.push(drk0);
+    
+    enqueueEffectsFromCard(state, 0, "drk_0", "immediate", "drk0");
+    
+    const drkEffects = state.effectQueue.filter(e => e.sourceInstanceId === "drk0");
+    expect(drkEffects).toHaveLength(1);
+    expect(drkEffects[0].type).toBe("draw"); // shift is ignored
+  });
+
+  it("suppresses mid/bot effects completely on uncover", () => {
+    const state = makeState();
+    // apy_2 provides the passive (face-up in line 0)
+    const apy2: CardInstance = { instanceId: "apy2", defId: "apy_2", face: CardFace.FaceUp };
+    // drk_0 is placed face-up but was covered, so it only fired index 0. Now it's uncovered.
+    const drk0: CardInstance = { instanceId: "drk0", defId: "drk_0", face: CardFace.FaceUp };
+    state.players[0].lines[0].cards = [apy2, drk0];
+    
+    enqueueEffectsOnUncover(state, 0, drk0);
+    
+    // Normally would queue 'shift'. But ignore_mid_commands suppresses the mid commands.
+    const uncoverEffects = state.effectQueue.filter(e => e.sourceInstanceId === "drk0");
+    expect(uncoverEffects).toHaveLength(0);
+  });
+});
+

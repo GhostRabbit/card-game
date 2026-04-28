@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compile - Board Layout Editor</title>
+    <meta name="description" content="A tool to collaboratively design and agree on terminology for the board layout of the Compile card game.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar left-sidebar">
+            <div class="sidebar-header">
+                <h1>Compile.</h1>
+                <p>Layout Editor</p>
+            </div>
+            
+            <div class="tool-section">
+                <h3>Add Zone</h3>
+                <div class="add-buttons">
+                    <button class="btn-add" data-type="Deck" data-color="var(--zone-purple)">+ Deck</button>
+                    <button class="btn-add" data-type="Hand" data-color="var(--zone-blue)">+ Hand</button>
+                    <button class="btn-add" data-type="Play Area" data-color="var(--zone-green)">+ Play Area</button>
+                    <button class="btn-add" data-type="Discard" data-color="var(--zone-red)">+ Discard</button>
+                    <button class="btn-add" data-type="Custom" data-color="var(--zone-gray)">+ Custom Zone</button>
+                </div>
+            </div>
+
+            <div class="tool-section">
+                <h3>Actions</h3>
+                <div class="action-buttons">
+                    <button class="btn-action" id="btn-export">Export JSON</button>
+                    <button class="btn-action" id="btn-import">Import JSON</button>
+                    <button class="btn-action btn-danger" id="btn-clear">Clear Board</button>
+                </div>
+            </div>
+        </aside>
+
+        <main class="board-container">
+            <div class="board-wrapper">
+                <div class="board" id="board">
+                    <!-- Zones will be appended here -->
+                </div>
+            </div>
+        </main>
+
+        <aside class="sidebar right-sidebar" id="properties-panel">
+            <div class="sidebar-header">
+                <h2>Properties</h2>
+            </div>
+            
+            <div id="no-selection-msg" class="empty-state">
+                Select a zone to edit its properties.
+            </div>
+
+            <div id="properties-form" class="hidden">
+                <div class="form-group">
+                    <label for="zone-name">Zone Name</label>
+                    <input type="text" id="zone-name" placeholder="e.g. Player 1 Hand">
+                </div>
+                <div class="form-group">
+                    <label for="zone-color">Color Theme</label>
+                    <div class="color-picker">
+                        <button class="color-btn" data-color="var(--zone-purple)" style="background: var(--zone-purple);"></button>
+                        <button class="color-btn" data-color="var(--zone-blue)" style="background: var(--zone-blue);"></button>
+                        <button class="color-btn" data-color="var(--zone-green)" style="background: var(--zone-green);"></button>
+                        <button class="color-btn" data-color="var(--zone-red)" style="background: var(--zone-red);"></button>
+                        <button class="color-btn" data-color="var(--zone-orange)" style="background: var(--zone-orange);"></button>
+                        <button class="color-btn" data-color="var(--zone-gray)" style="background: var(--zone-gray);"></button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Dimensions & Position</label>
+                    <div class="dim-inputs">
+                        <div class="dim-input-group">
+                            <label>W</label>
+                            <input type="number" id="zone-w" min="50">
+                        </div>
+                        <div class="dim-input-group">
+                            <label>H</label>
+                            <input type="number" id="zone-h" min="50">
+                        </div>
+                        <div class="dim-input-group">
+                            <label>X</label>
+                            <input type="number" id="zone-x">
+                        </div>
+                        <div class="dim-input-group">
+                            <label>Y</label>
+                            <input type="number" id="zone-y">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group actions-group">
+                    <button class="btn-danger" id="btn-delete-zone">Delete Zone</button>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Hidden file input for import -->
+    <input type="file" id="file-import" accept=".json" style="display: none;">
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -120,79 +120,72 @@ export class MenuScene extends Phaser.Scene {
     this.add.text(login.labelX, login.userY, "PILOT NAME", {
       fontSize: "14px", fontFamily: "monospace", color: theme.textMain, fontStyle: "bold",
     }).setOrigin(0.5);
-    const usernameBox = this.add.rectangle(login.inputX, login.userY, login.inputW, login.inputH, theme.inputBg)
-      .setStrokeStyle(2, theme.inputStrokeIdle);
-    const usernameText = this.add.text(login.inputX, login.userY, "", {
-      fontSize: "18px", fontFamily: "monospace", color: "#ffffff", fontStyle: "bold",
-    }).setOrigin(0.5);
-    let username = "";
+    const usernameInput = this.add.dom(login.inputX, login.userY, 'input', `
+      width: ${login.inputW}px;
+      height: ${login.inputH}px;
+      background-color: #111f31;
+      border: 2px solid #356284;
+      color: #ffffff;
+      font-family: monospace;
+      font-size: 18px;
+      font-weight: bold;
+      text-align: center;
+      outline: none;
+      box-sizing: border-box;
+    `) as Phaser.GameObjects.DOMElement;
 
+    const uNode = usernameInput.node as HTMLInputElement;
+    uNode.maxLength = 16;
+    uNode.spellcheck = false;
+    
+    let username = "";
     if ((import.meta as any).env?.DEV) {
       username = `P${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      usernameText.setText(username);
     }
+    uNode.value = username;
+
+    uNode.addEventListener('focus', () => uNode.style.borderColor = '#39f0c9');
+    uNode.addEventListener('blur', () => uNode.style.borderColor = '#356284');
+    uNode.addEventListener('input', () => username = uNode.value);
+
+    const usernameText = { setText: (t: string) => { uNode.value = t; username = t; } };
 
     // Room Code (for joining)
-    const codeBox = this.add.rectangle(login.panelCx, login.roomY, 230, login.inputH, theme.inputBg)
-      .setStrokeStyle(2, theme.inputStrokeIdle);
-    const codeText = this.add.text(login.panelCx, login.roomY, "", {
-      fontSize: "18px", fontFamily: "monospace", color: "#ffe3a0", fontStyle: "bold",
-    }).setOrigin(0.5);
     this.add.text(login.panelCx, login.roomY - 36, "ROOM CODE", {
       fontSize: "14px", fontFamily: "monospace", color: theme.textMain, fontStyle: "bold",
     }).setOrigin(0.5).setDepth(5);
+
+    const codeInput = this.add.dom(login.panelCx, login.roomY, 'input', `
+      width: 230px;
+      height: ${login.inputH}px;
+      background-color: #111f31;
+      border: 2px solid #356284;
+      color: #ffe3a0;
+      font-family: monospace;
+      font-size: 18px;
+      font-weight: bold;
+      text-align: center;
+      outline: none;
+      box-sizing: border-box;
+      text-transform: uppercase;
+    `) as Phaser.GameObjects.DOMElement;
+
+    const cNode = codeInput.node as HTMLInputElement;
+    cNode.maxLength = 6;
+    cNode.spellcheck = false;
+    
     let roomInput = "";
-    let activeInput: "username" | "code" = "username";
-
-    // Highlight active input
-    const updateHighlight = () => {
-      usernameBox.setStrokeStyle(2, activeInput === "username" ? theme.inputStrokeActive : theme.inputStrokeIdle);
-      codeBox.setStrokeStyle(2, activeInput === "code" ? theme.inputStrokeActive : theme.inputStrokeIdle);
-    };
-    usernameBox.setInteractive().on("pointerdown", () => { activeInput = "username"; updateHighlight(); });
-    codeBox.setInteractive().on("pointerdown", () => { activeInput = "code"; updateHighlight(); });
-    updateHighlight();
-
-    // Keyboard input
-    // Native paste handler — fires before Phaser sees the key, so we read the clipboard directly
-    const onPaste = (e: ClipboardEvent) => {
-      const text = e.clipboardData?.getData("text") ?? "";
-      if (activeInput === "username") {
-        username = (username + text).slice(0, 16);
-        usernameText.setText(username);
-      } else {
-        roomInput = (roomInput + text).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
-        codeText.setText(roomInput);
-      }
-      e.preventDefault();
-    };
-    window.addEventListener("paste", onPaste);
-    // Clean up when scene shuts down
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => window.removeEventListener("paste", onPaste));
-
-    this.input.keyboard!.on("keydown", (event: KeyboardEvent) => {
-      if (event.key === "Tab") {
-        activeInput = activeInput === "username" ? "code" : "username";
-        updateHighlight();
-        return;
-      }
-      if (event.key === "Backspace") {
-        if (activeInput === "username") { username = username.slice(0, -1); usernameText.setText(username); }
-        else { roomInput = roomInput.slice(0, -1); codeText.setText(roomInput); }
-        return;
-      }
-      // Ignore Ctrl/Cmd+V — handled by the paste event above
-      if (event.key === "v" && (event.ctrlKey || event.metaKey)) return;
-      if (event.key.length === 1) {
-        if (activeInput === "username" && username.length < 16) {
-          username += event.key;
-          usernameText.setText(username);
-        } else if (activeInput === "code" && roomInput.length < 6) {
-          roomInput += event.key.toUpperCase();
-          codeText.setText(roomInput);
-        }
-      }
+    cNode.addEventListener('focus', () => cNode.style.borderColor = '#39f0c9');
+    cNode.addEventListener('blur', () => cNode.style.borderColor = '#356284');
+    cNode.addEventListener('input', () => {
+      cNode.value = cNode.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      roomInput = cNode.value;
     });
+
+    const codeText = { setText: (t: string) => { cNode.value = t; roomInput = t; } };
+
+    // Auto focus username on load
+    setTimeout(() => uNode.focus(), 100);
 
     // Status text
     const statusText = this.add.text(width / 2, login.statusY, "", {
